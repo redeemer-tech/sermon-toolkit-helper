@@ -1,4 +1,6 @@
 streamlit
-openai
+openai>=1.75
 python-dotenv
 pyperclip
+markdown2
+bs4
