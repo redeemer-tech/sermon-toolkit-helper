@@ -5,10 +5,12 @@ import os
 from dotenv import load_dotenv
 from hashlib import sha256
 from hmac import compare_digest
+import markdown2
+import bs4
 
 # Load environment variables and setup
 load_dotenv()
-st.set_page_config(page_title="Audio Transcription App")
+st.set_page_config(page_title="Small Group Toolkit Generator")
 
 # Add password verification function
 def verify_password(input_password, stored_password):
@@ -29,7 +31,7 @@ if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
 # Title should be visible at all times
-st.title("Audio Transcription App")
+st.title("Small Group Toolkit Generator")
 
 # Password protection
 if not st.session_state.authenticated:
@@ -108,6 +110,27 @@ if 'current_model' not in st.session_state:
 if 'upload_counter' not in st.session_state:
     st.session_state.upload_counter = 0
 
+# Define default toolkit prompt
+DEFAULT_TOOLKIT_PROMPT = (
+    "I have attached a transcript of the sermon audio (probably not 100% accurately transcribed)\n\n"
+    "Please create a unified toolkit to help small group leaders guide their groups through the sermon content. "
+    "The toolkit should be returned in plain text (not markdown) and must include the following sections:\n\n"
+    "Summary:\n"
+    "• Start with a detailed, multi-paragraph summary of the sermon.\n"
+    "  \n"
+    "• Follow the summary with a bullet point section that highlights the main points of the sermon, reflecting the key takeaways as presented by the preacher.\n\n"
+    "Discussion Questions:\n"
+    "• Develop 5-6 insightful and singular discussion questions designed to facilitate meaningful conversation and spiritual growth.\n\n"
+    "Appendix:\n"
+    "• Conclude with an appendix listing the key scriptures referenced in the sermon in full text."
+)
+
+# Initialize additional session state
+if 'toolkit' not in st.session_state:
+    st.session_state.toolkit = None
+if 'toolkit_prompt' not in st.session_state:
+    st.session_state.toolkit_prompt = DEFAULT_TOOLKIT_PROMPT
+
 def transcribe_audio(file_path, model="whisper-1"):
     with open(file_path, "rb") as audio_file:
         transcript = client.audio.transcriptions.create(
@@ -118,58 +141,141 @@ def transcribe_audio(file_path, model="whisper-1"):
         paragraphs = [p.strip() for p in str(transcript).split('\n') if p.strip()]
         return paragraphs
 
-# File uploader with dynamic key
-uploaded_file = st.file_uploader("Upload an audio file", 
-    type=['mp3', 'wav', 'mpeg', 'm4a'],
-    key=f"uploader_{st.session_state.upload_counter}")
+def markdown_to_plain(md: str) -> str:
+    html = markdown2.markdown(md)
+    text = bs4.BeautifulSoup(html, "html.parser").get_text()
+    return text.strip()
 
-if uploaded_file:
-    # Start transcription immediately after file upload
+# Choose input mode
+mode = st.radio(
+    "How would you like to provide the sermon content?",
+    ("Audio file", "Existing transcript"),
+    index=0,
+)
+
+uploaded_file = None  # declare for type completeness
+
+if mode == "Audio file":
+    # File uploader with dynamic key
+    uploaded_file = st.file_uploader(
+        "Upload an audio file",
+        type=["mp3", "wav", "mpeg", "m4a"],
+        key=f"uploader_{st.session_state.upload_counter}",
+    )
+
+    if uploaded_file:
+        # Start transcription immediately after file upload
+        if not st.session_state.transcription:
+            with st.spinner("Transcribing audio..."):
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=os.path.splitext(uploaded_file.name)[1]
+                ) as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_file_path = tmp_file.name
+
+                try:
+                    # Use whisper-1 model for transcription
+                    paragraphs = transcribe_audio(tmp_file_path, "whisper-1")
+                    st.session_state.transcription = "\n\n".join(paragraphs)
+                finally:
+                    os.unlink(tmp_file_path)
+
+if mode == "Existing transcript":
     if not st.session_state.transcription:
-        with st.spinner('Transcribing audio...'):
-            # Save uploaded file temporarily
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
-                tmp_file.write(uploaded_file.getvalue())
-                tmp_file_path = tmp_file.name
+        st.info("Upload a transcript file or paste the text below.")
+        txt_file = st.file_uploader(
+            "Upload transcript (.txt or .md)",
+            type=["txt", "md"],
+            key="transcript_file_uploader",
+        )
+        if txt_file is not None:
+            st.session_state.transcription = txt_file.read().decode("utf-8")
+            st.success("Transcript loaded from file.")
 
+        manual_text = st.text_area(
+            "Or paste transcript here", key="manual_transcript_input", height=200
+        )
+        if st.button("Use Pasted Transcript", disabled=not manual_text.strip()):
+            st.session_state.transcription = manual_text.strip()
+            st.success("Transcript loaded from pasted text.")
+
+# If we have a transcript, display it and toolkit generator section
+if st.session_state.transcription:
+    st.text_area("Transcription", st.session_state.transcription, height=300)
+    
+    # Toolkit section
+    st.subheader("Toolkit Generator")
+    
+    # Prompt editor
+    st.text_area(
+        "Toolkit Prompt (editable)",
+        key="toolkit_prompt_input",
+        value=st.session_state.toolkit_prompt,
+        on_change=lambda: st.session_state.update(toolkit_prompt=st.session_state["toolkit_prompt_input"]),
+        height=200,
+    )
+    
+    if st.button("Generate Toolkit", type="primary", help="Generate small group toolkit using current prompt and transcription"):
+        with st.spinner("Generating toolkit with OpenAI…"):
             try:
-                # Use whisper-1 model for transcription
-                paragraphs = transcribe_audio(tmp_file_path, "whisper-1")
-                # Join paragraphs with double newlines
-                st.session_state.transcription = "\n\n".join(paragraphs)
-            finally:
-                os.unlink(tmp_file_path)
-
-    # Display transcription
-    if st.session_state.transcription:
-        st.text_area("Transcription", st.session_state.transcription, height=300)
+                response = client.responses.create(
+                    model="gpt-4o",  # default flagship model
+                    instructions=st.session_state.toolkit_prompt,
+                    input=st.session_state.transcription,
+                )
+                # New Responses API returns .output_text shortcut
+                output_md = getattr(response, "output_text", None)
+                if output_md is None:
+                    # Fallback to first output message if shortcut missing
+                    output_md = response.output[0].content[0].text  # type: ignore
+                st.session_state.toolkit = output_md.strip()
+            except Exception as e:
+                st.error(f"Error generating toolkit: {e}")
+                st.session_state.toolkit = None
+    
+    # Display toolkit if available
+    if st.session_state.toolkit:
+        st.markdown("### Generated Toolkit")
+        plain_toolkit = markdown_to_plain(st.session_state.toolkit)
+        st.text_area("Toolkit (Plain Text)", plain_toolkit, height=400)
         
-        # Create two columns with 1:2 ratio
-        col1, col2 = st.columns([1, 2])
-        
-        # Reset button in left column (red)
-        with col1:
-            if st.button("Reset", 
-                        use_container_width=True,
-                        type="secondary",  # secondary with custom color
-                        help="Clear current transcription and start over"):
-                st.session_state.upload_counter += 1
-                st.session_state.transcription = None
-                st.rerun()
+        st.download_button(
+            label="Download Toolkit (Plain Text)",
+            data=plain_toolkit,
+            file_name="toolkit.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+    
+    # Create two columns with 1:2 ratio
+    col1, col2 = st.columns([1, 2])
+    
+    # Reset button in left column (red)
+    with col1:
+        if st.button("Reset", 
+                    use_container_width=True,
+                    type="secondary",  # secondary with custom color
+                    help="Clear current transcription and start over"):
+            st.session_state.upload_counter += 1
+            st.session_state.transcription = None
+            st.rerun()
 
-        # Download button in right column (blue)
-        with col2:
+    # Download button in right column (blue)
+    with col2:
+        if uploaded_file is not None:
             original_filename = os.path.splitext(uploaded_file.name)[0]
-            download_filename = f"{original_filename}_transcription.txt"  # Simplified and ensured .txt suffix
-            
-            st.download_button(
-                label="Download Transcription",
-                data=st.session_state.transcription,
-                file_name=download_filename,
-                mime="text/plain",
-                use_container_width=True,
-                type="primary",
-                help="Download transcription as text file"
-            )
-            if st.session_state.get('download_clicked', False):
-                st.success("✓ Downloaded successfully!")
+            download_filename = f"{original_filename}_transcription.txt"
+        else:
+            download_filename = "transcription.txt"
+
+        st.download_button(
+            label="Download Transcription",
+            data=st.session_state.transcription,
+            file_name=download_filename,
+            mime="text/plain",
+            use_container_width=True,
+            type="primary",
+            help="Download transcription as text file",
+        )
+        if st.session_state.get('download_clicked', False):
+            st.success("✓ Downloaded successfully!")
