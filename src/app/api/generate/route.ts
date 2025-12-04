@@ -53,7 +53,7 @@ Structure your questions exactly as follows for clarity and consistency:
 
 ## **Appendix: Key Scriptures**
 
-* List each key scripture referenced in the sermon fully and clearly, using the NIV translation (unless another translation is explicitly requested or provided).
+* List each key scripture referenced in the sermon fully and clearly, using the ESV translation (unless another translation is explicitly requested or provided).
 * Clearly format each scripture using markdown quote formatting for readability.
 * Separate each scripture clearly with headings or spacing.
 
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
 
     // Extract the output text from the response
     let outputText = response.output_text || '';
-    
+
     // Fallback: try to extract from output array if output_text is empty
     if (!outputText && response.output?.length) {
       const firstOutput = response.output[0];
