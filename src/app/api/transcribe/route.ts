@@ -94,8 +94,8 @@ export async function POST(request: NextRequest) {
     const text = transcription.text || '';
     const paragraphs = text
       .split('\n')
-      .filter((p) => p.trim())
-      .map((p) => p.trim())
+      .filter((p: string) => p.trim())
+      .map((p: string) => p.trim())
       .join('\n\n');
 
     return NextResponse.json({ transcript: paragraphs || text });

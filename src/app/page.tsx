@@ -230,7 +230,6 @@ export default function Home() {
     container.style.lineHeight = '1.6';
     container.style.color = '#1a1a1a';
     container.style.textAlign = 'left';
-    container.style.textJustify = 'none';
     
     // Add logo at top center - extends to left edge
     const logoContainer = document.createElement('div');
@@ -296,7 +295,6 @@ export default function Home() {
       content.innerHTML = elem.innerHTML;
       content.style.flex = '1';
       content.style.textAlign = 'left';
-      content.style.textJustify = 'none';
       elem.innerHTML = '';
       // Add bullet as pseudo-content via a span
       const bullet = document.createElement('span');
@@ -321,7 +319,6 @@ export default function Home() {
       content.innerHTML = elem.innerHTML;
       content.style.flex = '1';
       content.style.textAlign = 'left';
-      content.style.textJustify = 'none';
       elem.innerHTML = '';
       // Add number as pseudo-content via a span
       const number = document.createElement('span');
@@ -371,7 +368,6 @@ export default function Home() {
       const elem = el as HTMLElement;
       elem.style.marginBottom = '1em';
       elem.style.textAlign = 'left';
-      elem.style.textJustify = 'none';
     });
     
     // Ensure all text is left-aligned
@@ -434,15 +430,16 @@ export default function Home() {
     wrapHeadingsWithMinContent(proseContainer as HTMLElement);
     
     const opt = {
-      margin: [15, 15, 15, 15],
+      margin: [15, 15, 15, 15] as [number, number, number, number],
       filename: 'toolkit.pdf',
-      image: { type: 'jpeg', quality: 0.98 },
+      image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['css', 'legacy'], before: '.html2pdf__page-break' }
+      jsPDF: { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const },
+      pagebreak: { mode: ['css', 'legacy'] as const, before: '.html2pdf__page-break' }
     };
     
-    await html2pdf().set(opt).from(container).save();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (html2pdf() as any).set(opt).from(container).save();
   };
 
   const stripMarkdown = (md: string): string => {

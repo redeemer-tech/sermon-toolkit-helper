@@ -1,0 +1,39 @@
+name: Sign Commits
+
+on:
+  push:
+    branches:
+      - main
+      - '**'
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    # Prevent infinite loop - don't run on commits from this action
+    if: github.actor != 'redeemer-tech'
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.REDEEMER_TECH_PAT }}
+      
+      - name: Configure Git
+        run: |
+          git config user.name "redeemer-tech"
+          git config user.email "tech@redeemer.co.za"
+      
+      - name: Update build timestamp
+        run: |
+          echo "Last verified: $(date -u +"%Y-%m-%dT%H:%M:%SZ")" > .build-timestamp
+      
+      - name: Commit and push
+        run: |
+          git add .build-timestamp
+          git commit -m "chore: verify build [skip ci]" || echo "No changes to commit"
+          git push
+

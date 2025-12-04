@@ -95,11 +95,21 @@ export async function POST(request: NextRequest) {
       input: transcript,
     });
 
-    // Extract the output text
-    const outputText =
-      response.output_text ||
-      response.output?.[0]?.content?.[0]?.text ||
-      '';
+    // Extract the output text from the response
+    let outputText = response.output_text || '';
+    
+    // Fallback: try to extract from output array if output_text is empty
+    if (!outputText && response.output?.length) {
+      const firstOutput = response.output[0];
+      if (firstOutput && 'content' in firstOutput && Array.isArray(firstOutput.content)) {
+        const textContent = firstOutput.content.find(
+          (c: unknown) => typeof c === 'object' && c !== null && 'text' in c
+        );
+        if (textContent && typeof textContent === 'object' && 'text' in textContent) {
+          outputText = (textContent as { text: string }).text;
+        }
+      }
+    }
 
     return NextResponse.json({ toolkit: outputText.trim() });
   } catch (error) {
