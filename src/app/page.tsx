@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { upload } from '@vercel/blob/client';
 
 type InputMode = 'audio' | 'transcript';
 type AppState = 'login' | 'input' | 'result';
@@ -107,7 +108,7 @@ export default function Home() {
     if (!file) return;
     setAudioFile(file);
 
-    // Check file size on client side too (25MB limit)
+    // Check file size on client side too (25MB limit - Groq's limit)
     const maxSize = 25 * 1024 * 1024;
     if (file.size > maxSize) {
       const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
@@ -120,16 +121,30 @@ export default function Home() {
     }
 
     setIsLoading(true);
-    setLoadingMessage('Transcribing audio... This may take a few minutes for longer recordings.');
+    setLoadingMessage('Uploading audio file...');
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
+      // Step 1: Upload to Vercel Blob (bypasses serverless function body limits)
+      const blob = await upload(file.name, file, {
+        access: 'public',
+        handleUploadUrl: '/api/upload',
+      });
 
+      setLoadingMessage('Transcribing audio... This may take a few minutes for longer recordings.');
+
+      // Step 2: Call transcribe API with the blob URL
       const response = await fetch('/api/transcribe', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blobUrl: blob.url, fileName: file.name }),
       });
+
+      // Handle non-JSON responses
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(text || `Server error: ${response.status}`);
+      }
 
       const data = await response.json();
 
@@ -165,11 +180,19 @@ export default function Home() {
         body: JSON.stringify({ transcript, preacherName }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to generate toolkit');
+      // Handle non-JSON responses (e.g., Vercel 413 "Request Entity Too Large")
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(text || `Server error: ${response.status}`);
       }
 
       const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate toolkit');
+      }
+
       setToolkit(data.toolkit);
       setAppState('result');
     } catch (error) {
