@@ -24,6 +24,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           allowedContentTypes: [
             'audio/mpeg',
             'audio/mp3',
+            'audio/mpga',
             'audio/mp4',
             'audio/m4a',
             'audio/wav',
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             'audio/flac',
             'audio/x-m4a',
             'video/mp4', // Some m4a files are detected as video/mp4
+            'video/mpeg', // Some .mpeg files are detected as video/mpeg
           ],
           maximumSizeInBytes: 25 * 1024 * 1024, // 25MB - Groq's limit
           tokenPayload: JSON.stringify({

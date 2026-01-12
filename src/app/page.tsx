@@ -905,7 +905,7 @@ export default function Home() {
                     Drop your audio file here or click to browse
                   </p>
                   <p className="text-sm text-[var(--color-text-muted)] mt-2">
-                    Supports MP3, WAV, M4A, MPEG (max 25MB)
+                    Supports FLAC, MP3, MP4, MPEG, MPGA, M4A, OGG, WAV, WEBM (max 25MB)
                   </p>
                 </div>
               )}
@@ -913,7 +913,7 @@ export default function Home() {
                 ref={fileInputRef}
                 id="audio-upload"
                 type="file"
-                accept=".mp3,.wav,.m4a,.mpeg,audio/*"
+                accept=".flac,.mp3,.mp4,.mpeg,.mpga,.m4a,.ogg,.wav,.webm,audio/*"
                 onChange={handleFileChange}
                 className="hidden"
               />
