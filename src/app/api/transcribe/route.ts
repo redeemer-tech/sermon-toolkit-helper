@@ -6,6 +6,35 @@ export const maxDuration = 300; // 5 minutes timeout
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
+async function fetchBlobWithRetry(blobUrl: string): Promise<Response> {
+  const maxAttempts = 5;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const response = await fetch(blobUrl, {
+      cache: 'no-store',
+    });
+
+    if (response.ok) {
+      return response;
+    }
+
+    console.warn(
+      `Blob fetch attempt ${attempt}/${maxAttempts} failed with status ${response.status} for ${blobUrl}`
+    );
+
+    if (attempt === maxAttempts) {
+      throw new Error(
+        `Failed to fetch audio from blob storage (status ${response.status})`
+      );
+    }
+
+    const retryDelayMs = attempt * 750;
+    await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+  }
+
+  throw new Error('Failed to fetch audio from blob storage');
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { blobUrl, fileName } = await request.json();
@@ -20,10 +49,7 @@ export async function POST(request: NextRequest) {
     console.log(`Fetching audio from blob: ${blobUrl}`);
 
     // Fetch the audio file from Vercel Blob
-    const audioResponse = await fetch(blobUrl);
-    if (!audioResponse.ok) {
-      throw new Error('Failed to fetch audio from blob storage');
-    }
+    const audioResponse = await fetchBlobWithRetry(blobUrl);
 
     const audioBlob = await audioResponse.blob();
     const fileSizeMB = (audioBlob.size / (1024 * 1024)).toFixed(1);

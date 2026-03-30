@@ -21,6 +21,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
 
         return {
+          addRandomSuffix: true,
           allowedContentTypes: [
             'audio/mpeg',
             'audio/mp3',
@@ -41,9 +42,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           }),
         };
       },
-      onUploadCompleted: async ({ blob }) => {
-        console.log('Audio upload completed:', blob.url);
-      },
     });
 
     return NextResponse.json(jsonResponse);
@@ -55,4 +53,3 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 }
-

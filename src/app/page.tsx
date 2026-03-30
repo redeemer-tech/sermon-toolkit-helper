@@ -6,8 +6,24 @@ import { upload } from '@vercel/blob/client';
 
 type InputMode = 'audio' | 'transcript';
 type AppState = 'login' | 'input' | 'result';
-type ResultViewMode = 'preview' | 'edit' | 'split';
+type ResultViewMode = 'preview' | 'edit' | 'split' | 'transcript';
 type DropdownOpen = 'none' | 'copy' | 'download';
+type ToolkitVersionSource = 'generated' | 'regenerated' | 'ai-edit' | 'manual';
+
+type ToolkitVersion = {
+  id: string;
+  name: string;
+  toolkit: string;
+  source: ToolkitVersionSource;
+  createdAt: string;
+  parentId?: string;
+  note?: string;
+};
+
+type DiffLine = {
+  type: 'equal' | 'added' | 'removed';
+  text: string;
+};
 
 const AUTH_STORAGE_KEY = 'sermon-toolkit-authenticated';
 
@@ -19,7 +35,11 @@ export default function Home() {
   const [inputMode, setInputMode] = useState<InputMode>('audio');
   const [transcript, setTranscript] = useState('');
   const [preacherName, setPreacherName] = useState('');
-  const [toolkit, setToolkit] = useState('');
+  const [versions, setVersions] = useState<ToolkitVersion[]>([]);
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
+  const [compareVersionId, setCompareVersionId] = useState<string>('');
+  const [toolkitDraft, setToolkitDraft] = useState('');
+  const [aiEditInstructions, setAiEditInstructions] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [audioFile, setAudioFile] = useState<File | null>(null);
@@ -30,6 +50,13 @@ export default function Home() {
   const previewPanelRef = useRef<HTMLDivElement>(null);
   const isScrollingSyncRef = useRef(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const activeVersion =
+    versions.find((version) => version.id === activeVersionId) ?? null;
+  const compareVersion =
+    versions.find((version) => version.id === compareVersionId) ?? null;
+  const hasUnsavedDraft =
+    activeVersion !== null && toolkitDraft !== activeVersion.toolkit;
 
   // Check for existing authentication on mount
   useEffect(() => {
@@ -49,6 +76,127 @@ export default function Home() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const createVersionId = () => {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      return crypto.randomUUID();
+    }
+
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  };
+
+  const buildVersionName = (source: ToolkitVersionSource) => {
+    const count = versions.filter((version) => version.source === source).length + 1;
+    const labels: Record<ToolkitVersionSource, string> = {
+      generated: 'Initial',
+      regenerated: 'Regenerated',
+      'ai-edit': 'AI Edit',
+      manual: 'Manual Save',
+    };
+
+    return `${labels[source]} ${count}`;
+  };
+
+  const createVersion = (
+    toolkit: string,
+    source: ToolkitVersionSource,
+    options?: { parentId?: string; note?: string }
+  ): ToolkitVersion => ({
+    id: createVersionId(),
+    name: buildVersionName(source),
+    toolkit,
+    source,
+    createdAt: new Date().toISOString(),
+    parentId: options?.parentId,
+    note: options?.note,
+  });
+
+  const selectVersion = (versionId: string, nextDraft?: string) => {
+    const version = versions.find((item) => item.id === versionId);
+    if (!version) return;
+
+    setActiveVersionId(versionId);
+    setToolkitDraft(nextDraft ?? version.toolkit);
+    if (compareVersionId === versionId) {
+      setCompareVersionId('');
+    }
+  };
+
+  const saveVersionAndSelect = (
+    toolkit: string,
+    source: ToolkitVersionSource,
+    options?: { parentId?: string; note?: string }
+  ) => {
+    const version = createVersion(toolkit, source, options);
+    setVersions((current) => [...current, version]);
+    setActiveVersionId(version.id);
+    setToolkitDraft(toolkit);
+    return version;
+  };
+
+  const confirmDiscardUnsavedDraft = () => {
+    if (!hasUnsavedDraft) return true;
+    return window.confirm('You have unsaved draft changes. Discard them?');
+  };
+
+  const formatVersionTime = (isoString: string) =>
+    new Date(isoString).toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+
+  const buildDiffLines = (beforeText: string, afterText: string): DiffLine[] => {
+    const beforeLines = beforeText.split('\n');
+    const afterLines = afterText.split('\n');
+    const dp = Array.from({ length: beforeLines.length + 1 }, () =>
+      Array(afterLines.length + 1).fill(0)
+    );
+
+    for (let i = beforeLines.length - 1; i >= 0; i--) {
+      for (let j = afterLines.length - 1; j >= 0; j--) {
+        dp[i][j] =
+          beforeLines[i] === afterLines[j]
+            ? dp[i + 1][j + 1] + 1
+            : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+
+    const lines: DiffLine[] = [];
+    let i = 0;
+    let j = 0;
+
+    while (i < beforeLines.length && j < afterLines.length) {
+      if (beforeLines[i] === afterLines[j]) {
+        lines.push({ type: 'equal', text: beforeLines[i] });
+        i++;
+        j++;
+        continue;
+      }
+
+      if (dp[i + 1][j] >= dp[i][j + 1]) {
+        lines.push({ type: 'removed', text: beforeLines[i] });
+        i++;
+        continue;
+      }
+
+      lines.push({ type: 'added', text: afterLines[j] });
+      j++;
+    }
+
+    while (i < beforeLines.length) {
+      lines.push({ type: 'removed', text: beforeLines[i] });
+      i++;
+    }
+
+    while (j < afterLines.length) {
+      lines.push({ type: 'added', text: afterLines[j] });
+      j++;
+    }
+
+    return lines;
+  };
 
   const handleEditScroll = useCallback(() => {
     if (isScrollingSyncRef.current) return;
@@ -167,6 +315,32 @@ export default function Home() {
     }
   };
 
+  const requestToolkitGeneration = async (): Promise<string> => {
+    if (!transcript.trim() || !preacherName.trim()) {
+      throw new Error('Transcript and preacher name are required');
+    }
+
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transcript, preacherName }),
+    });
+
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      throw new Error(text || `Server error: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to generate toolkit');
+    }
+
+    return data.toolkit as string;
+  };
+
   const handleGenerateToolkit = async () => {
     if (!transcript.trim() || !preacherName.trim()) return;
 
@@ -174,26 +348,8 @@ export default function Home() {
     setLoadingMessage('Generating toolkit with AI...');
 
     try {
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript, preacherName }),
-      });
-
-      // Handle non-JSON responses (e.g., Vercel 413 "Request Entity Too Large")
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await response.text();
-        throw new Error(text || `Server error: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to generate toolkit');
-      }
-
-      setToolkit(data.toolkit);
+      const generatedToolkit = await requestToolkitGeneration();
+      saveVersionAndSelect(generatedToolkit, 'generated');
       setAppState('result');
     } catch (error) {
       console.error('Generation error:', error);
@@ -204,9 +360,102 @@ export default function Home() {
     }
   };
 
+  const handleRegenerateToolkit = async () => {
+    if (!confirmDiscardUnsavedDraft()) return;
+
+    setIsLoading(true);
+    setLoadingMessage('Regenerating toolkit...');
+
+    try {
+      const generatedToolkit = await requestToolkitGeneration();
+      saveVersionAndSelect(generatedToolkit, 'regenerated', {
+        parentId: activeVersionId ?? undefined,
+      });
+      setAiEditInstructions('');
+    } catch (error) {
+      console.error('Regeneration error:', error);
+      alert('Failed to regenerate toolkit. Please try again.');
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  };
+
+  const handleAiEditToolkit = async () => {
+    if (!transcript.trim() || !preacherName.trim() || !toolkitDraft.trim()) return;
+    if (!aiEditInstructions.trim()) {
+      alert('Add edit instructions first.');
+      return;
+    }
+
+    setIsLoading(true);
+    setLoadingMessage('Applying AI edits...');
+
+    try {
+      const response = await fetch('/api/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript,
+          preacherName,
+          currentToolkit: toolkitDraft,
+          editInstructions: aiEditInstructions,
+        }),
+      });
+
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(text || `Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to edit toolkit');
+      }
+
+      saveVersionAndSelect(data.toolkit, 'ai-edit', {
+        parentId: activeVersionId ?? undefined,
+        note: aiEditInstructions.trim(),
+      });
+      setAiEditInstructions('');
+    } catch (error) {
+      console.error('AI edit error:', error);
+      alert('Failed to edit toolkit with AI. Please try again.');
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  };
+
+  const handleSaveDraftAsVersion = () => {
+    if (!activeVersion || !hasUnsavedDraft) return;
+
+    saveVersionAndSelect(toolkitDraft, 'manual', {
+      parentId: activeVersion.id,
+    });
+  };
+
+  const handleDiscardDraftChanges = () => {
+    if (!activeVersion) return;
+    setToolkitDraft(activeVersion.toolkit);
+  };
+
+  const handleVersionSelect = (versionId: string) => {
+    if (versionId === activeVersionId) return;
+    if (!confirmDiscardUnsavedDraft()) return;
+    selectVersion(versionId);
+  };
+
   const handleReset = () => {
+    if (!confirmDiscardUnsavedDraft()) return;
     setTranscript('');
-    setToolkit('');
+    setVersions([]);
+    setActiveVersionId(null);
+    setCompareVersionId('');
+    setToolkitDraft('');
+    setAiEditInstructions('');
     setPreacherName('');
     setAudioFile(null);
     setAppState('input');
@@ -242,7 +491,7 @@ export default function Home() {
     } else {
       // Render markdown to HTML for edit-only mode
       const markdownHtml = ReactDOMServer.renderToStaticMarkup(
-        React.createElement(MarkdownComponent, { children: toolkit })
+        React.createElement(MarkdownComponent, null, toolkitDraft)
       );
       container.innerHTML = markdownHtml;
     }
@@ -307,23 +556,25 @@ export default function Home() {
     
     container.querySelectorAll('ul > li').forEach((li) => {
       const elem = li as HTMLElement;
-      elem.style.display = 'flex';
-      elem.style.alignItems = 'baseline';
-      elem.style.justifyContent = 'flex-start';
+      elem.style.display = 'block';
+      elem.style.position = 'relative';
       elem.style.marginBottom = '0.5em';
-      elem.style.paddingLeft = '0';
+      elem.style.paddingLeft = '1.25em';
       elem.style.textAlign = 'left';
+      elem.style.breakInside = 'avoid';
+      elem.style.pageBreakInside = 'avoid';
       // Wrap content in a div to prevent flex from affecting inline elements
       const content = document.createElement('div');
       content.innerHTML = elem.innerHTML;
-      content.style.flex = '1';
       content.style.textAlign = 'left';
       elem.innerHTML = '';
       // Add bullet as pseudo-content via a span
       const bullet = document.createElement('span');
       bullet.textContent = '•';
-      bullet.style.marginRight = '0.5em';
-      bullet.style.flexShrink = '0';
+      bullet.style.position = 'absolute';
+      bullet.style.left = '0';
+      bullet.style.top = '0';
+      bullet.style.width = '1em';
       bullet.style.color = '#8b1a32';
       elem.appendChild(bullet);
       elem.appendChild(content);
@@ -331,24 +582,25 @@ export default function Home() {
     
     container.querySelectorAll('ol > li').forEach((li, index) => {
       const elem = li as HTMLElement;
-      elem.style.display = 'flex';
-      elem.style.alignItems = 'baseline';
-      elem.style.justifyContent = 'flex-start';
+      elem.style.display = 'block';
+      elem.style.position = 'relative';
       elem.style.marginBottom = '0.5em';
-      elem.style.paddingLeft = '0';
+      elem.style.paddingLeft = '1.6em';
       elem.style.textAlign = 'left';
+      elem.style.breakInside = 'avoid';
+      elem.style.pageBreakInside = 'avoid';
       // Wrap content in a div to prevent flex from affecting inline elements
       const content = document.createElement('div');
       content.innerHTML = elem.innerHTML;
-      content.style.flex = '1';
       content.style.textAlign = 'left';
       elem.innerHTML = '';
       // Add number as pseudo-content via a span
       const number = document.createElement('span');
       number.textContent = `${index + 1}.`;
-      number.style.marginRight = '0.5em';
-      number.style.flexShrink = '0';
-      number.style.minWidth = '1.25em';
+      number.style.position = 'absolute';
+      number.style.left = '0';
+      number.style.top = '0';
+      number.style.width = '1.35em';
       number.style.color = '#8b1a32';
       elem.appendChild(number);
       elem.appendChild(content);
@@ -370,13 +622,11 @@ export default function Home() {
     container.querySelectorAll('h1, h2, h3').forEach((el) => {
       const elem = el as HTMLElement;
       elem.style.fontFamily = 'Georgia, serif';
-      elem.style.marginTop = '1.5em';
-      elem.style.marginBottom = '0.75em';
+      elem.style.marginTop = '1em';
+      elem.style.marginBottom = '0.9em';
       elem.style.borderBottom = '1px solid #ccc';
       elem.style.paddingBottom = '0.5em';
-    });
-    container.querySelectorAll('h3').forEach((el) => {
-      (el as HTMLElement).style.color = '#8b1a32';
+      elem.style.color = '#1a1a1a';
     });
     container.querySelectorAll('blockquote').forEach((el) => {
       const elem = el as HTMLElement;
@@ -392,7 +642,90 @@ export default function Home() {
       elem.style.marginBottom = '1em';
       elem.style.textAlign = 'left';
     });
-    
+
+    const proseContainer = (container.querySelector('.prose') || container) as HTMLElement;
+    const looksLikeScriptureReference = (text: string | null | undefined) =>
+      Boolean(
+        text?.trim().match(
+          /^(?:[1-3]\s+)?[A-Za-z]+(?:\s+[A-Za-z]+)*\s+\d+:\d+(?:[-–]\d+)?$/
+        )
+      );
+
+    const applyAppendixPdfStyles = (root: HTMLElement) => {
+      const nodes = [root, ...Array.from(root.querySelectorAll('*'))] as HTMLElement[];
+
+      nodes.forEach((node) => {
+        const tagName = node.tagName.toLowerCase();
+
+        if (tagName === 'h2') {
+          node.style.fontSize = '1.05em';
+          node.style.marginTop = '0.25em';
+          node.style.marginBottom = '0.7em';
+          node.style.paddingBottom = '0.3em';
+          node.style.color = '#1a1a1a';
+        } else if (['h3', 'h4', 'h5', 'h6'].includes(tagName)) {
+          node.style.fontSize = '0.95em';
+          node.style.marginTop = '0.4em';
+          node.style.marginBottom = '0.5em';
+          node.style.paddingBottom = '0';
+          node.style.borderBottom = 'none';
+          node.style.color = '#1a1a1a';
+        } else if (tagName === 'blockquote') {
+          node.style.fontSize = '0.88em';
+          node.style.lineHeight = '1.35';
+          node.style.paddingLeft = '0.7em';
+          node.style.paddingTop = '0.25em';
+          node.style.paddingBottom = '0.35em';
+          node.style.marginTop = '0';
+          node.style.marginBottom = '0.55em';
+          node.style.breakInside = 'auto';
+          node.style.pageBreakInside = 'auto';
+        } else if (tagName === 'p') {
+          if (
+            looksLikeScriptureReference(node.textContent) &&
+            node.nextElementSibling?.tagName.toLowerCase() === 'blockquote'
+          ) {
+            node.style.fontSize = '0.95em';
+            node.style.fontWeight = '700';
+            node.style.lineHeight = '1.25';
+            node.style.marginTop = '0.4em';
+            node.style.marginBottom = '0.5em';
+            node.style.color = '#1a1a1a';
+          } else if (node.closest('blockquote')) {
+            node.style.fontSize = '0.9em';
+            node.style.lineHeight = '1.35';
+            node.style.marginTop = '0';
+            node.style.marginBottom = '0.15em';
+          } else {
+            node.style.fontSize = '0.9em';
+            node.style.lineHeight = '1.35';
+            node.style.marginBottom = '0.55em';
+          }
+        } else if (tagName === 'li' || tagName === 'ul' || tagName === 'ol') {
+          node.style.fontSize = '0.9em';
+          node.style.lineHeight = '1.35';
+          node.style.marginBottom = '0.35em';
+        }
+      });
+    };
+
+    let isInAppendix = false;
+    Array.from(proseContainer.children).forEach((child) => {
+      const element = child as HTMLElement;
+      const tagName = element.tagName.toLowerCase();
+
+      if (
+        ['h1', 'h2', 'h3'].includes(tagName) &&
+        element.textContent?.toLowerCase().includes('appendix')
+      ) {
+        isInAppendix = true;
+      }
+
+      if (isInAppendix) {
+        applyAppendixPdfStyles(element);
+      }
+    });
+
     // Ensure all text is left-aligned
     container.querySelectorAll('*').forEach((el) => {
       const elem = el as HTMLElement;
@@ -406,6 +739,7 @@ export default function Home() {
     const wrapHeadingsWithMinContent = (parent: HTMLElement) => {
       const children = Array.from(parent.children);
       const newChildren: Element[] = [];
+      let isInAppendix = false;
       
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
@@ -414,11 +748,44 @@ export default function Home() {
         const isAppendixHeading = isHeading && child.textContent?.toLowerCase().includes('appendix');
         
         if (isAppendixHeading) {
-          // Add page break div before appendix
-          const pageBreak = document.createElement('div');
-          pageBreak.className = 'html2pdf__page-break';
-          newChildren.push(pageBreak);
-          newChildren.push(child.cloneNode(true) as Element);
+          const appendixHeading = child.cloneNode(true) as HTMLElement;
+          appendixHeading.style.breakBefore = 'page';
+          appendixHeading.style.pageBreakBefore = 'always';
+          appendixHeading.style.marginTop = '0';
+          newChildren.push(appendixHeading);
+          isInAppendix = true;
+        } else if (isInAppendix) {
+          const nextChild = children[i + 1];
+          const isScriptureSectionHeading =
+            (tagName === 'p' && looksLikeScriptureReference(child.textContent)) ||
+            (['h3', 'h4', 'h5', 'h6'].includes(tagName) &&
+              nextChild?.tagName.toLowerCase() === 'blockquote');
+          const nextIsBlockquote =
+            nextChild?.tagName.toLowerCase() === 'blockquote';
+
+          if (isScriptureSectionHeading && nextIsBlockquote) {
+            const sectionWrapper = document.createElement('div');
+            const blockquoteTextLength = nextChild.textContent?.trim().length || 0;
+            const shouldKeepTogether = blockquoteTextLength < 700;
+
+            sectionWrapper.className = 'appendix-section';
+            sectionWrapper.style.display = 'block';
+            sectionWrapper.style.breakInside = shouldKeepTogether ? 'avoid' : 'auto';
+            sectionWrapper.style.pageBreakInside = shouldKeepTogether
+              ? 'avoid'
+              : 'auto';
+
+            if (!shouldKeepTogether) {
+              sectionWrapper.style.minHeight = '7.2em';
+            }
+
+            sectionWrapper.appendChild(child.cloneNode(true));
+            sectionWrapper.appendChild(nextChild.cloneNode(true));
+            newChildren.push(sectionWrapper);
+            i += 1;
+          } else {
+            newChildren.push(child.cloneNode(true) as Element);
+          }
         } else if (isHeading) {
           // Create a wrapper for heading + first following element only
           // This keeps heading with start of content but allows rest to flow
@@ -449,11 +816,10 @@ export default function Home() {
     };
     
     // Find the prose container and process sections
-    const proseContainer = container.querySelector('.prose') || container;
-    wrapHeadingsWithMinContent(proseContainer as HTMLElement);
+    wrapHeadingsWithMinContent(proseContainer);
     
     const opt = {
-      margin: [15, 15, 15, 15] as [number, number, number, number],
+      margin: [10, 10, 10, 10] as [number, number, number, number],
       filename: 'toolkit.pdf',
       image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true },
@@ -485,6 +851,75 @@ export default function Home() {
       console.error('Failed to copy');
     }
   };
+
+  const diffLines = compareVersion
+    ? buildDiffLines(compareVersion.toolkit, toolkitDraft)
+    : [];
+
+  const viewModeControls = (
+    <div className="flex gap-1 p-1 bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] shadow-sm">
+      <button
+        onClick={() => setResultViewMode('preview')}
+        title="Preview only"
+        className={`p-2.5 rounded-lg transition-all duration-200 ${
+          resultViewMode === 'preview'
+            ? 'bg-[var(--color-accent)] text-white shadow-sm'
+            : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]'
+        }`}
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+        </svg>
+      </button>
+      <button
+        onClick={() => setResultViewMode('split')}
+        title="Side by side"
+        className={`p-2.5 rounded-lg transition-all duration-200 ${
+          resultViewMode === 'split'
+            ? 'bg-[var(--color-accent)] text-white shadow-sm'
+            : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]'
+        }`}
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+        </svg>
+      </button>
+      <button
+        onClick={() => setResultViewMode('edit')}
+        title="Edit only"
+        className={`p-2.5 rounded-lg transition-all duration-200 ${
+          resultViewMode === 'edit'
+            ? 'bg-[var(--color-accent)] text-white shadow-sm'
+            : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]'
+        }`}
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+      </button>
+      <button
+        onClick={() => setResultViewMode('transcript')}
+        title="Transcript"
+        className={`p-2.5 rounded-lg transition-all duration-200 ${
+          resultViewMode === 'transcript'
+            ? 'bg-[var(--color-accent)] text-white shadow-sm'
+            : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]'
+        }`}
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      </button>
+    </div>
+  );
+  const addedDiffCount = diffLines.filter((line) => line.type === 'added').length;
+  const removedDiffCount = diffLines.filter((line) => line.type === 'removed').length;
+  const currentToolkitLabel =
+    hasUnsavedDraft && activeVersion ? `${activeVersion.name} Draft` : activeVersion?.name;
+  const loadingHint = loadingMessage === 'Regenerating toolkit...'
+    ? 'Rebuilding the toolkit from the transcript and refreshing the scripture appendix.'
+    : 'This may take a moment...';
 
   // Login Screen
   if (appState === 'login') {
@@ -551,87 +986,227 @@ export default function Home() {
   }
 
   // Result Screen
-  if (appState === 'result' && toolkit) {
+  if (appState === 'result' && activeVersion && toolkitDraft) {
     return (
-      <main className="min-h-screen p-4 md:p-6 lg:p-8">
-        <div className={`mx-auto h-[calc(100vh-2rem)] md:h-[calc(100vh-3rem)] lg:h-[calc(100vh-4rem)] flex flex-col ${resultViewMode === 'split' ? 'max-w-[1600px]' : 'max-w-4xl'}`}>
-          <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 opacity-0 animate-fade-in shrink-0">
+      <main className="min-h-screen p-4 md:p-6 lg:p-8 relative">
+        {isLoading && (
+          <div className="fixed inset-0 bg-white/90 backdrop-blur-md flex items-center justify-center z-50">
+            <div className="text-center">
+              <div className="relative w-16 h-16 mx-auto mb-6">
+                <div className="absolute inset-0 border-2 border-[var(--color-accent)]/20 rounded-full" />
+                <div className="absolute inset-0 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin" />
+              </div>
+              <p className="text-xl text-[var(--color-text)]">{loadingMessage}</p>
+              <p className="text-sm text-[var(--color-text-muted)] mt-2">{loadingHint}</p>
+            </div>
+          </div>
+        )}
+
+        <div className={`mx-auto flex flex-col gap-4 ${resultViewMode === 'split' ? 'max-w-[1600px]' : 'max-w-6xl'}`}>
+          <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 opacity-0 animate-fade-in shrink-0">
             <div>
               <h1 className="text-2xl md:text-3xl font-bold text-[var(--color-text)]">Generated Toolkit</h1>
-              <p className="text-[var(--color-text-muted)] text-sm md:text-base mt-1">Review and edit your discussion guide</p>
+              <p className="text-[var(--color-text-muted)] text-sm md:text-base mt-1">
+                Review, revise, and compare toolkit versions
+              </p>
             </div>
-            <div className="flex items-center gap-3">
-              {/* View Mode Toggle */}
-              <div className="flex gap-1 p-1 bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] shadow-sm">
-                <button
-                  onClick={() => setResultViewMode('preview')}
-                  title="Preview only"
-                  className={`p-2.5 rounded-lg transition-all duration-200 ${
-                    resultViewMode === 'preview'
-                      ? 'bg-[var(--color-accent)] text-white shadow-sm'
-                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]'
-                  }`}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => setResultViewMode('split')}
-                  title="Side by side"
-                  className={`p-2.5 rounded-lg transition-all duration-200 ${
-                    resultViewMode === 'split'
-                      ? 'bg-[var(--color-accent)] text-white shadow-sm'
-                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]'
-                  }`}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => setResultViewMode('edit')}
-                  title="Edit only"
-                  className={`p-2.5 rounded-lg transition-all duration-200 ${
-                    resultViewMode === 'edit'
-                      ? 'bg-[var(--color-accent)] text-white shadow-sm'
-                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]'
-                  }`}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                </button>
-            </div>
-            <button
-              onClick={handleReset}
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={handleReset}
                 className="px-4 py-2.5 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)]/30 transition-all shadow-sm text-sm"
-            >
-              Start Over
-            </button>
+              >
+                Start Over
+              </button>
             </div>
           </header>
 
-          {/* Content Area */}
-          <div className={`opacity-0 animate-fade-in stagger-1 flex-1 min-h-0 mb-4 ${
-            resultViewMode === 'split' ? 'grid grid-cols-1 lg:grid-cols-2 gap-4' : ''
-          }`}>
-            {/* Edit Panel */}
+          <section className="opacity-0 animate-fade-in stagger-1 grid gap-4 lg:grid-cols-[1.25fr_1fr]">
+            <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] shadow-sm p-5">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-[var(--color-text)]">Versions</h2>
+                  <p className="text-sm text-[var(--color-text-muted)]">
+                    Saved snapshots of the toolkit. Select one to load it into the editor.
+                  </p>
+                </div>
+                <div className="text-sm text-[var(--color-text-muted)]">
+                  {versions.length} version{versions.length === 1 ? '' : 's'}
+                </div>
+              </div>
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                {[...versions].reverse().map((version) => {
+                  const isActive = version.id === activeVersionId;
+                  return (
+                    <button
+                      key={version.id}
+                      onClick={() => handleVersionSelect(version.id)}
+                      className={`min-w-52 text-left rounded-2xl border px-4 py-3 transition-all ${
+                        isActive
+                          ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/8 shadow-sm'
+                          : 'border-[var(--color-border)] hover:border-[var(--color-accent)]/40 hover:bg-[var(--color-surface-hover)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-semibold text-[var(--color-text)]">{version.name}</span>
+                        <span className="text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
+                          {version.source}
+                        </span>
+                      </div>
+                      <p className="text-sm text-[var(--color-text-muted)] mt-2">
+                        {formatVersionTime(version.createdAt)}
+                      </p>
+                      {version.note && (
+                        <p className="text-xs text-[var(--color-text-muted)] mt-2 line-clamp-2">
+                          {version.note}
+                        </p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] shadow-sm p-5">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-[var(--color-text)]">Version Compare</h2>
+                  <p className="text-sm text-[var(--color-text-muted)]">
+                    Compare another saved version against the current draft.
+                  </p>
+                </div>
+              </div>
+              <label className="block text-sm font-medium text-[var(--color-text-muted)] mb-2">
+                Compare against
+              </label>
+              <select
+                value={compareVersionId}
+                onChange={(e) => setCompareVersionId(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/20 transition-all"
+              >
+                <option value="">No comparison</option>
+                {versions
+                  .filter((version) => version.id !== activeVersionId)
+                  .slice()
+                  .reverse()
+                  .map((version) => (
+                    <option key={version.id} value={version.id}>
+                      {version.name} ({formatVersionTime(version.createdAt)})
+                    </option>
+                  ))}
+              </select>
+              <div className="mt-4 text-sm text-[var(--color-text-muted)]">
+                {compareVersion ? (
+                  <>
+                    Comparing <span className="font-semibold text-[var(--color-text)]">{compareVersion.name}</span> to{' '}
+                    <span className="font-semibold text-[var(--color-text)]">{currentToolkitLabel}</span>
+                  </>
+                ) : (
+                  'Select a version to see a line-by-line diff.'
+                )}
+              </div>
+            </div>
+          </section>
+
+          <section className="opacity-0 animate-fade-in stagger-2 bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] shadow-sm p-5">
+            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-[var(--color-text)]">AI Revision Tools</h2>
+                <p className="text-sm text-[var(--color-text-muted)]">
+                  Regenerate from the transcript, or ask AI to revise the current draft into a new saved version.
+                </p>
+              </div>
+              <div className="text-sm text-[var(--color-text-muted)]">
+                Current: <span className="font-semibold text-[var(--color-text)]">{currentToolkitLabel}</span>
+              </div>
+            </div>
+
+            <textarea
+              value={aiEditInstructions}
+              onChange={(e) => setAiEditInstructions(e.target.value)}
+              rows={3}
+              placeholder="Example: Tighten the summary, make the discussion questions more practical, and shorten the appendix headings."
+              className="w-full px-4 py-3 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/20 transition-all resize-none"
+            />
+
+            <div className="flex flex-wrap gap-3 mt-4">
+              <button
+                onClick={handleAiEditToolkit}
+                disabled={isLoading || !aiEditInstructions.trim()}
+                className="px-4 py-3 rounded-xl bg-[var(--color-accent)] text-white font-semibold hover:bg-[var(--color-accent-hover)] hover:shadow-lg hover:shadow-[var(--color-accent)]/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Edit With AI
+              </button>
+              <button
+                onClick={handleRegenerateToolkit}
+                disabled={isLoading}
+                className="px-4 py-3 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Regenerate Completely
+              </button>
+              <button
+                onClick={handleSaveDraftAsVersion}
+                disabled={!hasUnsavedDraft}
+                className="px-4 py-3 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Save Draft As Version
+              </button>
+              <button
+                onClick={handleDiscardDraftChanges}
+                disabled={!hasUnsavedDraft}
+                className="px-4 py-3 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Revert Draft
+              </button>
+            </div>
+          </section>
+
+          <div
+            className={`opacity-0 animate-fade-in stagger-3 min-h-[48vh] ${
+              resultViewMode === 'split' ? 'grid grid-cols-1 lg:grid-cols-2 gap-4' : ''
+            }`}
+          >
+            {resultViewMode === 'transcript' && (
+              <div className="flex flex-col min-h-[48vh] bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] shadow-lg overflow-hidden h-full">
+                <div className="px-5 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg)] shrink-0 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-muted)]">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Transcript
+                  </div>
+                  {viewModeControls}
+                </div>
+                <textarea
+                  value={transcript}
+                  onChange={(e) => setTranscript(e.target.value)}
+                  className="flex-1 w-full px-5 py-4 bg-transparent text-[var(--color-text)] focus:outline-none resize-none leading-relaxed overflow-auto"
+                  placeholder="Transcript will appear here..."
+                />
+              </div>
+            )}
+
             {(resultViewMode === 'edit' || resultViewMode === 'split') && (
-              <div className="flex flex-col min-h-0 bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] shadow-lg overflow-hidden h-full">
-                <div className="px-5 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg)] shrink-0">
+              <div className="flex flex-col min-h-[48vh] bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] shadow-lg overflow-hidden h-full">
+                <div className="px-5 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg)] shrink-0 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-muted)]">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
                     Edit Markdown
                   </div>
+                  <div className="flex items-center gap-3">
+                    {hasUnsavedDraft && (
+                      <span className="text-xs font-semibold text-[var(--color-accent)]">
+                        Unsaved draft changes
+                      </span>
+                    )}
+                    {resultViewMode !== 'split' && viewModeControls}
+                  </div>
                 </div>
                 <textarea
                   ref={editPanelRef}
-                  value={toolkit}
-                  onChange={(e) => setToolkit(e.target.value)}
+                  value={toolkitDraft}
+                  onChange={(e) => setToolkitDraft(e.target.value)}
                   onScroll={resultViewMode === 'split' ? handleEditScroll : undefined}
                   className="flex-1 w-full px-5 py-4 bg-transparent text-[var(--color-text)] focus:outline-none resize-none font-mono text-sm leading-relaxed overflow-auto"
                   placeholder="Edit your toolkit content here..."
@@ -639,10 +1214,9 @@ export default function Home() {
               </div>
             )}
 
-            {/* Preview Panel */}
             {(resultViewMode === 'preview' || resultViewMode === 'split') && (
-              <div className="flex flex-col min-h-0 bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] shadow-lg overflow-hidden h-full">
-                <div className="px-5 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg)] shrink-0">
+              <div className="flex flex-col min-h-[48vh] bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] shadow-lg overflow-hidden h-full">
+                <div className="px-5 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg)] shrink-0 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-muted)]">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -650,23 +1224,58 @@ export default function Home() {
                     </svg>
                     Preview
                   </div>
+                  {viewModeControls}
                 </div>
                 <div
                   ref={previewPanelRef}
                   onScroll={resultViewMode === 'split' ? handlePreviewScroll : undefined}
                   className="flex-1 px-5 py-4 overflow-auto"
                 >
-            <div className="prose max-w-none">
-              <ReactMarkdown>{toolkit}</ReactMarkdown>
-            </div>
+                  <div className="prose max-w-none">
+                    <ReactMarkdown>{toolkitDraft}</ReactMarkdown>
+                  </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Action Buttons */}
-          <div ref={dropdownRef} className="flex gap-3 opacity-0 animate-fade-in stagger-2 shrink-0">
-            {/* Copy Dropdown */}
+          {compareVersion && (
+            <section className="opacity-0 animate-fade-in stagger-4 bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-bg)] flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-[var(--color-text)]">Diff View</h2>
+                  <p className="text-sm text-[var(--color-text-muted)]">
+                    Comparing {compareVersion.name} with {currentToolkitLabel}
+                  </p>
+                </div>
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="text-emerald-700 font-semibold">+{addedDiffCount} added</span>
+                  <span className="text-rose-700 font-semibold">-{removedDiffCount} removed</span>
+                </div>
+              </div>
+              <div className="max-h-[32rem] overflow-auto bg-[#faf8f5] font-mono text-sm">
+                {diffLines.map((line, index) => (
+                  <div
+                    key={`${line.type}-${index}-${line.text}`}
+                    className={`px-5 py-1.5 whitespace-pre-wrap border-l-4 ${
+                      line.type === 'added'
+                        ? 'bg-emerald-50 border-emerald-400 text-emerald-950'
+                        : line.type === 'removed'
+                          ? 'bg-rose-50 border-rose-400 text-rose-950'
+                          : 'bg-transparent border-transparent text-[var(--color-text-muted)]'
+                    }`}
+                  >
+                    <span className="inline-block w-5">
+                      {line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '}
+                    </span>
+                    {line.text || ' '}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <div ref={dropdownRef} className="flex gap-3 opacity-0 animate-fade-in stagger-5 shrink-0">
             <div className="relative flex-1">
               <button
                 onClick={() => setDropdownOpen(dropdownOpen === 'copy' ? 'none' : 'copy')}
@@ -694,7 +1303,7 @@ export default function Home() {
               {dropdownOpen === 'copy' && (
                 <div className="absolute bottom-full left-0 right-0 mb-2 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-lg overflow-hidden z-10">
                   <button
-                    onClick={() => copyToClipboard(toolkit, 'markdown')}
+                    onClick={() => copyToClipboard(toolkitDraft, 'markdown')}
                     className="w-full px-4 py-3 text-left text-sm hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-3"
                   >
                     <svg className="w-4 h-4 text-[var(--color-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -703,7 +1312,7 @@ export default function Home() {
                     <span>Markdown</span>
                   </button>
                   <button
-                    onClick={() => copyToClipboard(stripMarkdown(toolkit), 'plain')}
+                    onClick={() => copyToClipboard(stripMarkdown(toolkitDraft), 'plain')}
                     className="w-full px-4 py-3 text-left text-sm hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-3 border-t border-[var(--color-border)]"
                   >
                     <svg className="w-4 h-4 text-[var(--color-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -713,9 +1322,8 @@ export default function Home() {
                   </button>
                 </div>
               )}
-          </div>
+            </div>
 
-            {/* Download Dropdown */}
             <div className="relative flex-1">
               <button
                 onClick={() => setDropdownOpen(dropdownOpen === 'download' ? 'none' : 'download')}
@@ -744,9 +1352,9 @@ export default function Home() {
                     </svg>
                     <span>PDF Document</span>
                   </button>
-            <button
+                  <button
                     onClick={() => {
-                      downloadFile(toolkit, 'toolkit.md', 'text/markdown');
+                      downloadFile(toolkitDraft, 'toolkit.md', 'text/markdown');
                       setDropdownOpen('none');
                     }}
                     className="w-full px-4 py-3 text-left text-sm hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-3 border-t border-[var(--color-border)] text-[var(--color-text)]"
@@ -755,10 +1363,10 @@ export default function Home() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                     </svg>
                     <span>Markdown (.md)</span>
-            </button>
-            <button
+                  </button>
+                  <button
                     onClick={() => {
-                      downloadFile(stripMarkdown(toolkit), 'toolkit.txt', 'text/plain');
+                      downloadFile(stripMarkdown(toolkitDraft), 'toolkit.txt', 'text/plain');
                       setDropdownOpen('none');
                     }}
                     className="w-full px-4 py-3 text-left text-sm hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-3 border-t border-[var(--color-border)] text-[var(--color-text)]"
@@ -767,7 +1375,7 @@ export default function Home() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
                     <span>Plain Text (.txt)</span>
-            </button>
+                  </button>
                 </div>
               )}
             </div>
