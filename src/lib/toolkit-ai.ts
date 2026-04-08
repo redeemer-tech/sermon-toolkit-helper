@@ -14,7 +14,7 @@ const groq = new Groq({
 export const DEFAULT_TOOLKIT_PROMPT = `I have attached a sermon transcript (note: it might not be 100% accurately transcribed).
 
 The preacher's name is: {preacher_name}.
-**Always use the preacher's name throughout the toolkit.**
+**Use the preacher's name when referencing the speaker.**
 
 Please create a **unified small group toolkit** specifically designed to help small group leaders guide meaningful discussions based on the sermon content. Present the toolkit clearly, warmly, and conversationally, accurately reflecting the preacher's main message, tone, and key insights.
 
@@ -28,8 +28,8 @@ The toolkit must contain these clearly defined sections (just use headings, no s
 
 ## **Summary**
 
-* In <300 words, provide an engaging, multi-paragraph summary of the sermon, clearly capturing the preacher's main points, illustrations, tone, and overall message (use past tense).
-* Immediately follow this detailed summary with a concise, bullet-point section titled **"Key Points"**, highlighting the main points of the sermon, reflecting the key takeaways as presented by the preacher.
+* In <300 words, provide an engaging, multi-paragraph summary of the sermon, clearly capturing the preacher's main points, illustrations, tone, and overall message (refer to the sermon in past tense).
+* Immediately follow this detailed summary with a concise, bullet-point section titled **"Key Points"**, highlighting the main points of the sermon, reflecting the key takeaways the preacher presented.
 
 
 ## **Discussion Questions**
