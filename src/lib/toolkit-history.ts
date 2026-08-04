@@ -76,18 +76,19 @@ async function supabaseRequest<T>(
     },
   });
 
+  const body = await response.text();
+
   if (!response.ok) {
-    const detail = (await response.text()).slice(0, 1_000);
     throw new Error(
-      `Redeemer Supabase request failed (${response.status}): ${detail}`
+      `Redeemer Supabase request failed (${response.status}): ${body.slice(0, 1_000)}`
     );
   }
 
-  if (response.status === 204) {
+  if (!body) {
     return undefined as T;
   }
 
-  return (await response.json()) as T;
+  return JSON.parse(body) as T;
 }
 
 function transcriptFingerprint(transcript: string): string {
