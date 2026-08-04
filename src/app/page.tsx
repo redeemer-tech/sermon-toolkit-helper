@@ -1242,7 +1242,7 @@ export default function Home() {
                 id="church"
                 value={selectedChurchSlug}
                 onChange={(event) => setSelectedChurchSlug(event.target.value)}
-                className="w-full px-5 py-4 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/20 transition-all text-base shadow-sm"
+                className="w-full px-5 py-4 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/20 transition-all text-lg shadow-sm"
               >
                 {availableChurches.map((availableChurch) => (
                   <option key={availableChurch.slug} value={availableChurch.slug}>
