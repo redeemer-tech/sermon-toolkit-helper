@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  getAuthenticatedChurch,
+  saveChurchSystemPrompt,
+} from '@/lib/church-auth';
 import { reviseToolkit } from '@/lib/toolkit-ai';
 import { saveToolkitVersion } from '@/lib/toolkit-history';
 
@@ -7,6 +11,11 @@ export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   try {
+    const church = await getAuthenticatedChurch(request);
+    if (!church) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
     const {
       transcript,
       preacherName,
@@ -52,19 +61,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const savedPrompt = await saveChurchSystemPrompt(church.id, customPrompt);
     const toolkit = await reviseToolkit({
       transcript: transcript.trim(),
       preacherName: preacherName.trim(),
-      customPrompt,
+      customPrompt: savedPrompt,
       currentToolkit,
       editInstructions,
     });
     const saved = await saveToolkitVersion({
+      churchId: church.id,
       sessionId,
       parentVersionId,
       transcript: transcript.trim(),
       preacherName: preacherName.trim(),
-      generationPrompt: customPrompt,
+      generationPrompt: savedPrompt,
       toolkit,
       source: 'ai-edit',
       editInstructions,

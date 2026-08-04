@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  getAuthenticatedChurch,
+  saveChurchSystemPrompt,
+} from '@/lib/church-auth';
 import { saveToolkitVersion } from '@/lib/toolkit-history';
 
 export async function POST(request: NextRequest) {
   try {
+    const church = await getAuthenticatedChurch(request);
+    if (!church) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
     const {
       sessionId,
       parentVersionId,
@@ -27,12 +36,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const savedPrompt = await saveChurchSystemPrompt(church.id, customPrompt);
     const saved = await saveToolkitVersion({
+      churchId: church.id,
       sessionId,
       parentVersionId,
       transcript: transcript.trim(),
       preacherName: preacherName.trim(),
-      generationPrompt: customPrompt,
+      generationPrompt: savedPrompt,
       toolkit,
       source: 'manual',
     });

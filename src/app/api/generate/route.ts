@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  getAuthenticatedChurch,
+  saveChurchSystemPrompt,
+} from '@/lib/church-auth';
 import { generateToolkit } from '@/lib/toolkit-ai';
 import {
   loadRecentToolkitHistory,
@@ -11,6 +15,11 @@ export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   try {
+    const church = await getAuthenticatedChurch(request);
+    if (!church) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
     const {
       transcript,
       preacherName,
@@ -42,28 +51,32 @@ export async function POST(request: NextRequest) {
 
     const normalizedTranscript = transcript.trim();
     const normalizedPreacherName = preacherName.trim();
+    const savedPrompt = await saveChurchSystemPrompt(church.id, customPrompt);
     const persistedSessionId = await saveToolkitSession({
+      churchId: church.id,
       sessionId,
       transcript: normalizedTranscript,
       preacherName: normalizedPreacherName,
-      generationPrompt: customPrompt,
+      generationPrompt: savedPrompt,
     });
     const history = await loadRecentToolkitHistory({
+      churchId: church.id,
       currentTranscript: normalizedTranscript,
       excludeSessionId: persistedSessionId,
     });
     const toolkit = await generateToolkit({
       transcript: normalizedTranscript,
       preacherName: normalizedPreacherName,
-      customPrompt,
+      customPrompt: savedPrompt,
       history,
     });
     const saved = await saveToolkitVersion({
+      churchId: church.id,
       sessionId: persistedSessionId,
       parentVersionId,
       transcript: normalizedTranscript,
       preacherName: normalizedPreacherName,
-      generationPrompt: customPrompt,
+      generationPrompt: savedPrompt,
       toolkit,
       source: sessionId ? 'regenerated' : 'generated',
     });

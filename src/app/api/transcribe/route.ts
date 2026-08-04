@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { del } from '@vercel/blob';
 
+import { getAuthenticatedChurch } from '@/lib/church-auth';
+
 // Configure route for long transcriptions
 export const maxDuration = 300; // 5 minutes timeout
 
@@ -37,6 +39,11 @@ async function fetchBlobWithRetry(blobUrl: string): Promise<Response> {
 
 export async function POST(request: NextRequest) {
   try {
+    const church = await getAuthenticatedChurch(request);
+    if (!church) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
     const { blobUrl, fileName } = await request.json();
 
     if (!blobUrl) {

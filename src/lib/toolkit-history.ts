@@ -3,6 +3,7 @@ import 'server-only';
 import { createHash, randomUUID } from 'node:crypto';
 
 import type { ToolkitHistoryEntry } from '@/lib/toolkit-history-context';
+import { supabaseRequest } from '@/lib/supabase-rest';
 
 export type ToolkitVersionSource =
   | 'generated'
@@ -25,6 +26,7 @@ type ToolkitVersionRow = {
 };
 
 type SaveToolkitVersionParams = {
+  churchId: string;
   sessionId?: string;
   parentVersionId?: string;
   transcript: string;
@@ -37,59 +39,17 @@ type SaveToolkitVersionParams = {
 
 type SaveToolkitSessionParams = Pick<
   SaveToolkitVersionParams,
-  'sessionId' | 'transcript' | 'preacherName' | 'generationPrompt'
+  | 'churchId'
+  | 'sessionId'
+  | 'transcript'
+  | 'preacherName'
+  | 'generationPrompt'
 >;
 
 const DEFAULT_HISTORY_LIMIT = 6;
 const HISTORY_QUERY_LIMIT = 12;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function getSupabaseConfig() {
-  const url = (
-    process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-  ).replace(/\/$/, '');
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-
-  if (!url || !serviceRoleKey) {
-    throw new Error(
-      'Toolkit history is not configured. SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.'
-    );
-  }
-
-  return { url, serviceRoleKey };
-}
-
-async function supabaseRequest<T>(
-  path: string,
-  init?: RequestInit
-): Promise<T> {
-  const { url, serviceRoleKey } = getSupabaseConfig();
-  const response = await fetch(`${url}/rest/v1/${path}`, {
-    ...init,
-    cache: 'no-store',
-    headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
-  });
-
-  const body = await response.text();
-
-  if (!response.ok) {
-    throw new Error(
-      `Redeemer Supabase request failed (${response.status}): ${body.slice(0, 1_000)}`
-    );
-  }
-
-  if (!body) {
-    return undefined as T;
-  }
-
-  return JSON.parse(body) as T;
-}
 
 function transcriptFingerprint(transcript: string): string {
   return createHash('sha256').update(transcript.trim()).digest('hex');
@@ -100,15 +60,21 @@ function validUuid(value: string | undefined): value is string {
 }
 
 async function createOrUpdateSession({
+  churchId,
   sessionId,
   transcript,
   preacherName,
   generationPrompt,
 }: Pick<
   SaveToolkitVersionParams,
-  'sessionId' | 'transcript' | 'preacherName' | 'generationPrompt'
+  | 'churchId'
+  | 'sessionId'
+  | 'transcript'
+  | 'preacherName'
+  | 'generationPrompt'
 >): Promise<string> {
   const payload = {
+    church_id: churchId,
     transcript,
     transcript_sha256: transcriptFingerprint(transcript),
     preacher_name: preacherName,
@@ -119,6 +85,7 @@ async function createOrUpdateSession({
   if (validUuid(sessionId)) {
     const params = new URLSearchParams({
       id: `eq.${sessionId}`,
+      church_id: `eq.${churchId}`,
       select: 'id',
     });
     const rows = await supabaseRequest<Array<{ id: string }>>(
@@ -136,7 +103,7 @@ async function createOrUpdateSession({
   }
 
   const params = new URLSearchParams({
-    on_conflict: 'transcript_sha256',
+    on_conflict: 'church_id,transcript_sha256',
     select: 'id',
   });
   const rows = await supabaseRequest<Array<{ id: string }>>(
@@ -168,6 +135,20 @@ export async function saveToolkitVersion(
 ): Promise<{ sessionId: string; versionId: string }> {
   const sessionId = await saveToolkitSession(params);
   const versionId = randomUUID();
+  let parentVersionId: string | null = null;
+
+  if (validUuid(params.parentVersionId)) {
+    const parentParams = new URLSearchParams({
+      id: `eq.${params.parentVersionId}`,
+      session_id: `eq.${sessionId}`,
+      select: 'id',
+      limit: '1',
+    });
+    const parentRows = await supabaseRequest<Array<{ id: string }>>(
+      `sermon_toolkit_versions?${parentParams}`
+    );
+    parentVersionId = parentRows[0]?.id ?? null;
+  }
 
   await supabaseRequest<void>('sermon_toolkit_versions', {
     method: 'POST',
@@ -175,9 +156,7 @@ export async function saveToolkitVersion(
     body: JSON.stringify({
       id: versionId,
       session_id: sessionId,
-      parent_version_id: validUuid(params.parentVersionId)
-        ? params.parentVersionId
-        : null,
+      parent_version_id: parentVersionId,
       source: params.source,
       toolkit: params.toolkit,
       edit_instructions: params.editInstructions?.trim() || null,
@@ -188,16 +167,19 @@ export async function saveToolkitVersion(
 }
 
 export async function loadRecentToolkitHistory({
+  churchId,
   currentTranscript,
   excludeSessionId,
   limit = DEFAULT_HISTORY_LIMIT,
 }: {
+  churchId: string;
   currentTranscript: string;
   excludeSessionId?: string;
   limit?: number;
 }): Promise<ToolkitHistoryEntry[]> {
   const sessionParams = new URLSearchParams({
     select: 'id,preacher_name,transcript,transcript_sha256,created_at',
+    church_id: `eq.${churchId}`,
     transcript_sha256: `neq.${transcriptFingerprint(currentTranscript)}`,
     order: 'created_at.desc',
     limit: String(Math.max(limit, HISTORY_QUERY_LIMIT)),

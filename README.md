@@ -11,9 +11,12 @@ APP_PASSWORD
 BLOB_READ_WRITE_TOKEN
 SUPABASE_URL
 SUPABASE_SERVICE_ROLE_KEY
+AUTH_SESSION_SECRET
 ```
 
-`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` must point to the Redeemer Supabase project. Apply `supabase/migrations/20260804104500_sermon_toolkit_history.sql` before generating a toolkit. The database tables are service-role only; they are not exposed to anonymous or authenticated browser clients.
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` must point to the Redeemer Supabase project. `AUTH_SESSION_SECRET` must be at least 32 characters and signs the HTTP-only church session cookie. `APP_PASSWORD` is retained only for compatibility with older deployments and is not used by the church login flow.
+
+Apply the migrations in `supabase/migrations` before generating a toolkit. Church accounts are created manually in the service-role-only `churches` table; there is intentionally no sign-up or public account-creation endpoint. Each sermon session, saved toolkit, recent-history query, and edited system prompt is scoped to the logged-in church.
 
 ## Getting Started
 

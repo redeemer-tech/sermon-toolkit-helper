@@ -11,6 +11,12 @@ type AppState = 'login' | 'input' | 'result';
 type ResultViewMode = 'preview' | 'edit' | 'split' | 'transcript';
 type DropdownOpen = 'none' | 'copy' | 'download';
 type ToolkitVersionSource = 'generated' | 'regenerated' | 'ai-edit' | 'manual';
+type PromptSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+type ChurchSummary = {
+  slug: string;
+  name: string;
+};
 
 type ToolkitVersion = {
   id: string;
@@ -39,14 +45,15 @@ type DiffLine = {
   text: string;
 };
 
-const AUTH_STORAGE_KEY = 'sermon-toolkit-authenticated';
-const TOOLKIT_PROMPT_STORAGE_KEY = 'sermon-toolkit-generation-prompt';
-
 export default function Home() {
   const [appState, setAppState] = useState<AppState>('login');
   const [resultViewMode, setResultViewMode] = useState<ResultViewMode>('preview');
   const [password, setPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [availableChurches, setAvailableChurches] = useState<ChurchSummary[]>([]);
+  const [selectedChurchSlug, setSelectedChurchSlug] = useState('');
+  const [church, setChurch] = useState<ChurchSummary | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [inputMode, setInputMode] = useState<InputMode>('audio');
   const [transcript, setTranscript] = useState('');
   const [preacherName, setPreacherName] = useState('');
@@ -56,6 +63,8 @@ export default function Home() {
   const [compareVersionId, setCompareVersionId] = useState<string>('');
   const [toolkitDraft, setToolkitDraft] = useState('');
   const [toolkitPrompt, setToolkitPrompt] = useState(DEFAULT_TOOLKIT_PROMPT);
+  const [promptSaveStatus, setPromptSaveStatus] =
+    useState<PromptSaveStatus>('idle');
   const [aiEditInstructions, setAiEditInstructions] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
@@ -67,7 +76,7 @@ export default function Home() {
   const previewPanelRef = useRef<HTMLDivElement>(null);
   const isScrollingSyncRef = useRef(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const hasLoadedPromptRef = useRef(false);
+  const lastSavedPromptRef = useRef(DEFAULT_TOOLKIT_PROMPT);
 
   const activeVersion =
     versions.find((version) => version.id === activeVersionId) ?? null;
@@ -76,28 +85,94 @@ export default function Home() {
   const hasUnsavedDraft =
     activeVersion !== null && toolkitDraft !== activeVersion.toolkit;
 
-  // Check for existing authentication on mount
+  // Restore the signed church session and its saved prompt on mount.
   useEffect(() => {
-    const isAuthenticated = localStorage.getItem(AUTH_STORAGE_KEY);
-    const savedToolkitPrompt = localStorage.getItem(TOOLKIT_PROMPT_STORAGE_KEY);
+    let cancelled = false;
 
-    if (isAuthenticated === 'true') {
-      setAppState('input');
-    }
+    const loadAuthentication = async () => {
+      try {
+        localStorage.removeItem('sermon-toolkit-authenticated');
+        localStorage.removeItem('sermon-toolkit-generation-prompt');
+        const response = await fetch('/api/auth', { cache: 'no-store' });
+        const data = await response.json();
 
-    if (savedToolkitPrompt?.trim()) {
-      setToolkitPrompt(savedToolkitPrompt);
-    }
+        if (!response.ok) {
+          throw new Error(data.error || 'Authentication is unavailable');
+        }
+
+        if (cancelled) return;
+        const churches = (data.churches || []) as ChurchSummary[];
+        setAvailableChurches(churches);
+        setSelectedChurchSlug(
+          data.church?.slug || churches[0]?.slug || ''
+        );
+
+        if (data.authenticated && data.church && data.systemPrompt) {
+          setChurch(data.church);
+          lastSavedPromptRef.current = data.systemPrompt;
+          setToolkitPrompt(data.systemPrompt);
+          setPromptSaveStatus('saved');
+          setAppState('input');
+        }
+      } catch (error) {
+        console.error('Authentication check failed:', error);
+        if (!cancelled) {
+          setPasswordError('Login is temporarily unavailable. Please try again.');
+        }
+      } finally {
+        if (!cancelled) setIsCheckingAuth(false);
+      }
+    };
+
+    loadAuthentication();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    if (!hasLoadedPromptRef.current) {
-      hasLoadedPromptRef.current = true;
+    if (!church || toolkitPrompt === lastSavedPromptRef.current) return;
+
+    if (!toolkitPrompt.trim()) {
+      setPromptSaveStatus('error');
       return;
     }
 
-    localStorage.setItem(TOOLKIT_PROMPT_STORAGE_KEY, toolkitPrompt);
-  }, [toolkitPrompt]);
+    let cancelled = false;
+    const controller = new AbortController();
+    setPromptSaveStatus('saving');
+    const timeout = window.setTimeout(async () => {
+      try {
+        const response = await fetch('/api/church/prompt', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ systemPrompt: toolkitPrompt }),
+          signal: controller.signal,
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to save instructions');
+        }
+
+        if (!cancelled) {
+          lastSavedPromptRef.current = data.systemPrompt;
+          setPromptSaveStatus('saved');
+        }
+      } catch (error) {
+        if (!cancelled && !(error instanceof DOMException && error.name === 'AbortError')) {
+          console.error('Prompt save failed:', error);
+          setPromptSaveStatus('error');
+        }
+      }
+    }, 700);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [church, toolkitPrompt]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -265,22 +340,53 @@ export default function Home() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPasswordError('');
     try {
       const response = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ churchSlug: selectedChurchSlug, password }),
       });
+      const data = await response.json();
 
       if (response.ok) {
-        localStorage.setItem(AUTH_STORAGE_KEY, 'true');
+        setChurch(data.church);
+        lastSavedPromptRef.current = data.systemPrompt;
+        setToolkitPrompt(data.systemPrompt);
+        setPromptSaveStatus('saved');
         setAppState('input');
+        setPassword('');
         setPasswordError('');
       } else {
-        setPasswordError('Incorrect password. Please try again.');
+        setPasswordError(data.error || 'Incorrect church or password.');
       }
     } catch {
       setPasswordError('Authentication failed. Please try again.');
+    }
+  };
+
+  const handleLogout = async () => {
+    if (!confirmDiscardUnsavedDraft()) return;
+
+    try {
+      await fetch('/api/auth', { method: 'DELETE' });
+    } finally {
+      setChurch(null);
+      setPassword('');
+      setPasswordError('');
+      setToolkitPrompt(DEFAULT_TOOLKIT_PROMPT);
+      lastSavedPromptRef.current = DEFAULT_TOOLKIT_PROMPT;
+      setPromptSaveStatus('idle');
+      setTranscript('');
+      setVersions([]);
+      setSessionId(null);
+      setActiveVersionId(null);
+      setCompareVersionId('');
+      setToolkitDraft('');
+      setAiEditInstructions('');
+      setPreacherName('');
+      setAudioFile(null);
+      setAppState('login');
     }
   };
 
@@ -377,6 +483,8 @@ export default function Home() {
       throw new Error(data.error || 'Failed to generate toolkit');
     }
 
+    lastSavedPromptRef.current = toolkitPrompt;
+    setPromptSaveStatus('saved');
     return data as SavedToolkitResponse;
   };
 
@@ -467,6 +575,8 @@ export default function Home() {
         throw new Error(data.error || 'Failed to edit toolkit');
       }
 
+      lastSavedPromptRef.current = toolkitPrompt;
+      setPromptSaveStatus('saved');
       setSessionId(data.sessionId);
       saveVersionAndSelect(data.toolkit, 'ai-edit', {
         id: data.versionId,
@@ -508,6 +618,8 @@ export default function Home() {
         throw new Error(data.error || 'Failed to save toolkit');
       }
 
+      lastSavedPromptRef.current = toolkitPrompt;
+      setPromptSaveStatus('saved');
       setSessionId(data.sessionId);
       saveVersionAndSelect(toolkitDraft, 'manual', {
         id: data.versionId,
@@ -951,9 +1063,24 @@ export default function Home() {
         className="w-full px-4 py-3 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/20 transition-all resize-y font-mono text-sm leading-relaxed"
       />
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-3">
-        <p className="text-xs text-[var(--color-text-muted)]">
-          Keep <code className="font-mono text-[var(--color-text)]">{'{preacher_name}'}</code> wherever the preacher&apos;s name should be inserted.
-        </p>
+        <div className="space-y-1">
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Keep <code className="font-mono text-[var(--color-text)]">{'{preacher_name}'}</code> wherever the preacher&apos;s name should be inserted.
+          </p>
+          {church && (
+            <p
+              className={`text-xs ${
+                promptSaveStatus === 'error'
+                  ? 'text-[var(--color-danger)]'
+                  : 'text-[var(--color-text-muted)]'
+              }`}
+            >
+              {promptSaveStatus === 'saving' && `Saving for ${church.name}…`}
+              {promptSaveStatus === 'saved' && `Saved for ${church.name}`}
+              {promptSaveStatus === 'error' && 'Not saved — check the instructions and try again.'}
+            </p>
+          )}
+        </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
@@ -1043,6 +1170,29 @@ export default function Home() {
   const loadingHint = loadingMessage === 'Regenerating toolkit...'
     ? 'Rebuilding the toolkit from the transcript and refreshing the scripture appendix.'
     : 'This may take a moment...';
+  const churchControls = church ? (
+    <div className="flex items-center gap-3">
+      <span className="text-sm text-[var(--color-text-muted)]">{church.name}</span>
+      <button
+        type="button"
+        onClick={handleLogout}
+        className="px-3.5 py-2 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)]/30 transition-all shadow-sm"
+      >
+        Log out
+      </button>
+    </div>
+  ) : null;
+
+  if (isCheckingAuth) {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6">
+        <div className="text-center">
+          <div className="w-12 h-12 mx-auto mb-4 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin" />
+          <p className="text-[var(--color-text-muted)]">Loading church access…</p>
+        </div>
+      </main>
+    );
+  }
 
   // Login Screen
   if (appState === 'login') {
@@ -1081,7 +1231,33 @@ export default function Home() {
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">
+            <div>
+              <label
+                htmlFor="church"
+                className="block text-sm font-medium text-[var(--color-text)] mb-2 px-1"
+              >
+                Church
+              </label>
+              <select
+                id="church"
+                value={selectedChurchSlug}
+                onChange={(event) => setSelectedChurchSlug(event.target.value)}
+                className="w-full px-5 py-4 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/20 transition-all text-base shadow-sm"
+              >
+                {availableChurches.map((availableChurch) => (
+                  <option key={availableChurch.slug} value={availableChurch.slug}>
+                    {availableChurch.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="relative">
+              <label
+                htmlFor="password"
+                className="block text-sm font-medium text-[var(--color-text)] mb-2 px-1"
+              >
+                Password
+              </label>
               <input
                 id="password"
                 type="password"
@@ -1098,10 +1274,14 @@ export default function Home() {
             
             <button
               type="submit"
+              disabled={!selectedChurchSlug || !password}
               className="w-full py-4 px-6 rounded-xl bg-[var(--color-accent)] text-white font-semibold text-lg hover:bg-[var(--color-accent-hover)] hover:shadow-lg hover:shadow-[var(--color-accent)]/20 transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0"
             >
               Enter
             </button>
+            <p className="text-center text-xs text-[var(--color-text-muted)]">
+              Church access is provisioned manually. There is no public sign-up.
+            </p>
           </form>
         </div>
       </main>
@@ -1134,6 +1314,7 @@ export default function Home() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
+              {churchControls}
               <button
                 onClick={handleReset}
                 className="px-4 py-2.5 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)]/30 transition-all shadow-sm text-sm"
@@ -1547,6 +1728,9 @@ export default function Home() {
       {/* Background decorations */}
       <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-[var(--color-accent)]/3 rounded-full blur-3xl pointer-events-none -translate-y-1/2 translate-x-1/3" />
       <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[var(--color-accent)]/5 rounded-full blur-3xl pointer-events-none translate-y-1/2 -translate-x-1/3" />
+      <div className="relative z-20 flex justify-end mb-4">
+        {churchControls}
+      </div>
       
       <div className={`max-w-3xl mx-auto w-full flex-1 flex flex-col ${!transcript ? 'justify-center' : ''} relative z-10`}>
         {/* Header */}
