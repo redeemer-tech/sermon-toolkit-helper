@@ -382,9 +382,9 @@ export async function generateToolkit({
     toolkit_markdown: string;
     scripture_references: string[];
   }>({
-    model: 'gpt-5.4',
+    model: 'gpt-5.6-terra',
     reasoning: {
-      effort: 'medium',
+      effort: 'high',
     },
     instructions: `${buildToolkitInstructions(prompt)}${buildHistoryAwareInstructions(history.length)}`,
     input: buildToolkitGenerationInput(transcript, history),
@@ -415,9 +415,9 @@ export async function reviseToolkit({
     toolkit_markdown: string;
     scripture_references: string[];
   }>({
-    model: 'gpt-5.4',
+    model: 'gpt-5.6-terra',
     reasoning: {
-      effort: 'medium',
+      effort: 'high',
     },
     instructions: `${buildToolkitInstructions(prompt)}
 
