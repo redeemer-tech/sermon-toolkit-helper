@@ -1,4 +1,19 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+This is the Redeemer sermon toolkit generator. It creates small-group material from a sermon transcript and retains sermon/toolkit history so new discussion questions can take recent weeks into account.
+
+## Environment
+
+The server requires:
+
+```text
+OPENAI_API_KEY
+GROQ_API_KEY
+APP_PASSWORD
+BLOB_READ_WRITE_TOKEN
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
+```
+
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` must point to the Redeemer Supabase project. Apply `supabase/migrations/20260804104500_sermon_toolkit_history.sql` before generating a toolkit. The database tables are service-role only; they are not exposed to anonymous or authenticated browser clients.
 
 ## Getting Started
 
@@ -14,7 +29,7 @@ pnpm dev
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000) with your browser to see the result.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

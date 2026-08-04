@@ -6,7 +6,8 @@
     "dev": "bun --bun next dev --turbopack",
     "build": "bun --bun next build",
     "start": "bun --bun next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "bun test"
   },
   "dependencies": {
     "@vercel/blob": "^2.0.0",

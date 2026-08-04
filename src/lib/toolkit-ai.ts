@@ -1,6 +1,11 @@
 import OpenAI from 'openai';
 import Groq from 'groq-sdk';
 
+import {
+  buildHistoryAwareInstructions,
+  buildToolkitGenerationInput,
+  type ToolkitHistoryEntry,
+} from '@/lib/toolkit-history-context';
 import { DEFAULT_TOOLKIT_PROMPT } from '@/lib/toolkit-prompt';
 
 const openai = new OpenAI({
@@ -44,9 +49,10 @@ type GenerateToolkitParams = {
   transcript: string;
   preacherName: string;
   customPrompt?: string;
+  history?: ToolkitHistoryEntry[];
 };
 
-type ReviseToolkitParams = GenerateToolkitParams & {
+type ReviseToolkitParams = Omit<GenerateToolkitParams, 'history'> & {
   currentToolkit: string;
   editInstructions: string;
 };
@@ -368,6 +374,7 @@ export async function generateToolkit({
   transcript,
   preacherName,
   customPrompt,
+  history = [],
 }: GenerateToolkitParams): Promise<string> {
   const prompt = getPrompt(preacherName, customPrompt);
 
@@ -379,8 +386,8 @@ export async function generateToolkit({
     reasoning: {
       effort: 'medium',
     },
-    instructions: buildToolkitInstructions(prompt),
-    input: transcript,
+    instructions: `${buildToolkitInstructions(prompt)}${buildHistoryAwareInstructions(history.length)}`,
+    input: buildToolkitGenerationInput(transcript, history),
     schemaName: 'toolkit_generation',
     schema: TOOLKIT_RESPONSE_SCHEMA,
     maxOutputTokens: 6000,

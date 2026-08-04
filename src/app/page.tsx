@@ -22,6 +22,18 @@ type ToolkitVersion = {
   note?: string;
 };
 
+type SavedToolkitResponse = {
+  toolkit: string;
+  sessionId: string;
+  versionId: string;
+};
+
+type CreateVersionOptions = {
+  id?: string;
+  parentId?: string;
+  note?: string;
+};
+
 type DiffLine = {
   type: 'equal' | 'added' | 'removed';
   text: string;
@@ -39,6 +51,7 @@ export default function Home() {
   const [transcript, setTranscript] = useState('');
   const [preacherName, setPreacherName] = useState('');
   const [versions, setVersions] = useState<ToolkitVersion[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
   const [compareVersionId, setCompareVersionId] = useState<string>('');
   const [toolkitDraft, setToolkitDraft] = useState('');
@@ -120,9 +133,9 @@ export default function Home() {
   const createVersion = (
     toolkit: string,
     source: ToolkitVersionSource,
-    options?: { parentId?: string; note?: string }
+    options?: CreateVersionOptions
   ): ToolkitVersion => ({
-    id: createVersionId(),
+    id: options?.id ?? createVersionId(),
     name: buildVersionName(source),
     toolkit,
     source,
@@ -145,7 +158,7 @@ export default function Home() {
   const saveVersionAndSelect = (
     toolkit: string,
     source: ToolkitVersionSource,
-    options?: { parentId?: string; note?: string }
+    options?: CreateVersionOptions
   ) => {
     const version = createVersion(toolkit, source, options);
     setVersions((current) => [...current, version]);
@@ -335,7 +348,7 @@ export default function Home() {
     }
   };
 
-  const requestToolkitGeneration = async (): Promise<string> => {
+  const requestToolkitGeneration = async (): Promise<SavedToolkitResponse> => {
     if (!transcript.trim() || !preacherName.trim() || !toolkitPrompt.trim()) {
       throw new Error('Transcript, preacher name, and toolkit instructions are required');
     }
@@ -347,6 +360,8 @@ export default function Home() {
         transcript,
         preacherName,
         customPrompt: toolkitPrompt,
+        sessionId,
+        parentVersionId: activeVersionId,
       }),
     });
 
@@ -362,7 +377,7 @@ export default function Home() {
       throw new Error(data.error || 'Failed to generate toolkit');
     }
 
-    return data.toolkit as string;
+    return data as SavedToolkitResponse;
   };
 
   const handleGenerateToolkit = async () => {
@@ -372,8 +387,11 @@ export default function Home() {
     setLoadingMessage('Generating toolkit with AI...');
 
     try {
-      const generatedToolkit = await requestToolkitGeneration();
-      saveVersionAndSelect(generatedToolkit, 'generated');
+      const generated = await requestToolkitGeneration();
+      setSessionId(generated.sessionId);
+      saveVersionAndSelect(generated.toolkit, 'generated', {
+        id: generated.versionId,
+      });
       setAppState('result');
     } catch (error) {
       console.error('Generation error:', error);
@@ -391,8 +409,10 @@ export default function Home() {
     setLoadingMessage('Regenerating toolkit...');
 
     try {
-      const generatedToolkit = await requestToolkitGeneration();
-      saveVersionAndSelect(generatedToolkit, 'regenerated', {
+      const generated = await requestToolkitGeneration();
+      setSessionId(generated.sessionId);
+      saveVersionAndSelect(generated.toolkit, 'regenerated', {
+        id: generated.versionId,
         parentId: activeVersionId ?? undefined,
       });
       setAiEditInstructions('');
@@ -430,6 +450,8 @@ export default function Home() {
           customPrompt: toolkitPrompt,
           currentToolkit: toolkitDraft,
           editInstructions: aiEditInstructions,
+          sessionId,
+          parentVersionId: activeVersionId,
         }),
       });
 
@@ -445,7 +467,9 @@ export default function Home() {
         throw new Error(data.error || 'Failed to edit toolkit');
       }
 
+      setSessionId(data.sessionId);
       saveVersionAndSelect(data.toolkit, 'ai-edit', {
+        id: data.versionId,
         parentId: activeVersionId ?? undefined,
         note: aiEditInstructions.trim(),
       });
@@ -459,12 +483,43 @@ export default function Home() {
     }
   };
 
-  const handleSaveDraftAsVersion = () => {
+  const handleSaveDraftAsVersion = async () => {
     if (!activeVersion || !hasUnsavedDraft) return;
 
-    saveVersionAndSelect(toolkitDraft, 'manual', {
-      parentId: activeVersion.id,
-    });
+    setIsLoading(true);
+    setLoadingMessage('Saving toolkit...');
+
+    try {
+      const response = await fetch('/api/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          parentVersionId: activeVersion.id,
+          transcript,
+          preacherName,
+          customPrompt: toolkitPrompt,
+          toolkit: toolkitDraft,
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to save toolkit');
+      }
+
+      setSessionId(data.sessionId);
+      saveVersionAndSelect(toolkitDraft, 'manual', {
+        id: data.versionId,
+        parentId: activeVersion.id,
+      });
+    } catch (error) {
+      console.error('Save error:', error);
+      alert('Failed to save toolkit. Please try again.');
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
   };
 
   const handleDiscardDraftChanges = () => {
@@ -482,6 +537,7 @@ export default function Home() {
     if (!confirmDiscardUnsavedDraft()) return;
     setTranscript('');
     setVersions([]);
+    setSessionId(null);
     setActiveVersionId(null);
     setCompareVersionId('');
     setToolkitDraft('');

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { reviseToolkit } from '@/lib/toolkit-ai';
+import { saveToolkitVersion } from '@/lib/toolkit-history';
 
 export const maxDuration = 300;
 
@@ -12,6 +13,8 @@ export async function POST(request: NextRequest) {
       customPrompt,
       currentToolkit,
       editInstructions,
+      sessionId,
+      parentVersionId,
     } = await request.json();
 
     if (!transcript) {
@@ -42,15 +45,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!customPrompt?.trim()) {
+      return NextResponse.json(
+        { error: 'Toolkit instructions are required' },
+        { status: 400 }
+      );
+    }
+
     const toolkit = await reviseToolkit({
-      transcript,
-      preacherName,
+      transcript: transcript.trim(),
+      preacherName: preacherName.trim(),
       customPrompt,
       currentToolkit,
       editInstructions,
     });
+    const saved = await saveToolkitVersion({
+      sessionId,
+      parentVersionId,
+      transcript: transcript.trim(),
+      preacherName: preacherName.trim(),
+      generationPrompt: customPrompt,
+      toolkit,
+      source: 'ai-edit',
+      editInstructions,
+    });
 
-    return NextResponse.json({ toolkit });
+    return NextResponse.json({ toolkit, ...saved });
   } catch (error) {
     console.error('Error editing toolkit:', error);
     return NextResponse.json({ error: 'Failed to edit toolkit' }, { status: 500 });
