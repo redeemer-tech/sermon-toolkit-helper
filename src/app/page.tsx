@@ -4,6 +4,8 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { upload } from '@vercel/blob/client';
 
+import { DEFAULT_TOOLKIT_PROMPT } from '@/lib/toolkit-prompt';
+
 type InputMode = 'audio' | 'transcript';
 type AppState = 'login' | 'input' | 'result';
 type ResultViewMode = 'preview' | 'edit' | 'split' | 'transcript';
@@ -26,6 +28,7 @@ type DiffLine = {
 };
 
 const AUTH_STORAGE_KEY = 'sermon-toolkit-authenticated';
+const TOOLKIT_PROMPT_STORAGE_KEY = 'sermon-toolkit-generation-prompt';
 
 export default function Home() {
   const [appState, setAppState] = useState<AppState>('login');
@@ -39,6 +42,7 @@ export default function Home() {
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
   const [compareVersionId, setCompareVersionId] = useState<string>('');
   const [toolkitDraft, setToolkitDraft] = useState('');
+  const [toolkitPrompt, setToolkitPrompt] = useState(DEFAULT_TOOLKIT_PROMPT);
   const [aiEditInstructions, setAiEditInstructions] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
@@ -50,6 +54,7 @@ export default function Home() {
   const previewPanelRef = useRef<HTMLDivElement>(null);
   const isScrollingSyncRef = useRef(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const hasLoadedPromptRef = useRef(false);
 
   const activeVersion =
     versions.find((version) => version.id === activeVersionId) ?? null;
@@ -61,10 +66,25 @@ export default function Home() {
   // Check for existing authentication on mount
   useEffect(() => {
     const isAuthenticated = localStorage.getItem(AUTH_STORAGE_KEY);
+    const savedToolkitPrompt = localStorage.getItem(TOOLKIT_PROMPT_STORAGE_KEY);
+
     if (isAuthenticated === 'true') {
       setAppState('input');
     }
+
+    if (savedToolkitPrompt?.trim()) {
+      setToolkitPrompt(savedToolkitPrompt);
+    }
   }, []);
+
+  useEffect(() => {
+    if (!hasLoadedPromptRef.current) {
+      hasLoadedPromptRef.current = true;
+      return;
+    }
+
+    localStorage.setItem(TOOLKIT_PROMPT_STORAGE_KEY, toolkitPrompt);
+  }, [toolkitPrompt]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -316,14 +336,18 @@ export default function Home() {
   };
 
   const requestToolkitGeneration = async (): Promise<string> => {
-    if (!transcript.trim() || !preacherName.trim()) {
-      throw new Error('Transcript and preacher name are required');
+    if (!transcript.trim() || !preacherName.trim() || !toolkitPrompt.trim()) {
+      throw new Error('Transcript, preacher name, and toolkit instructions are required');
     }
 
     const response = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript, preacherName }),
+      body: JSON.stringify({
+        transcript,
+        preacherName,
+        customPrompt: toolkitPrompt,
+      }),
     });
 
     const contentType = response.headers.get('content-type');
@@ -342,7 +366,7 @@ export default function Home() {
   };
 
   const handleGenerateToolkit = async () => {
-    if (!transcript.trim() || !preacherName.trim()) return;
+    if (!transcript.trim() || !preacherName.trim() || !toolkitPrompt.trim()) return;
 
     setIsLoading(true);
     setLoadingMessage('Generating toolkit with AI...');
@@ -382,7 +406,12 @@ export default function Home() {
   };
 
   const handleAiEditToolkit = async () => {
-    if (!transcript.trim() || !preacherName.trim() || !toolkitDraft.trim()) return;
+    if (
+      !transcript.trim() ||
+      !preacherName.trim() ||
+      !toolkitDraft.trim() ||
+      !toolkitPrompt.trim()
+    ) return;
     if (!aiEditInstructions.trim()) {
       alert('Add edit instructions first.');
       return;
@@ -398,6 +427,7 @@ export default function Home() {
         body: JSON.stringify({
           transcript,
           preacherName,
+          customPrompt: toolkitPrompt,
           currentToolkit: toolkitDraft,
           editInstructions: aiEditInstructions,
         }),
@@ -852,6 +882,43 @@ export default function Home() {
     }
   };
 
+  const isDefaultToolkitPrompt = toolkitPrompt === DEFAULT_TOOLKIT_PROMPT;
+
+  const toolkitPromptFields = (rows: number) => (
+    <>
+      <textarea
+        id="toolkit-prompt"
+        value={toolkitPrompt}
+        onChange={(event) => setToolkitPrompt(event.target.value)}
+        rows={rows}
+        spellCheck={false}
+        className="w-full px-4 py-3 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/20 transition-all resize-y font-mono text-sm leading-relaxed"
+      />
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-3">
+        <p className="text-xs text-[var(--color-text-muted)]">
+          Keep <code className="font-mono text-[var(--color-text)]">{'{preacher_name}'}</code> wherever the preacher&apos;s name should be inserted.
+        </p>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => copyToClipboard(toolkitPrompt, 'prompt')}
+            className="px-3.5 py-2 rounded-lg border border-[var(--color-border)] text-sm font-medium text-[var(--color-text)] hover:border-[var(--color-accent)]/40 hover:bg-[var(--color-surface-hover)] transition-all"
+          >
+            {copySuccess === 'prompt' ? 'Copied' : 'Copy prompt'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setToolkitPrompt(DEFAULT_TOOLKIT_PROMPT)}
+            disabled={isDefaultToolkitPrompt}
+            className="px-3.5 py-2 rounded-lg border border-[var(--color-border)] text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)]/40 hover:bg-[var(--color-surface-hover)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Restore default
+          </button>
+        </div>
+      </div>
+    </>
+  );
+
   const diffLines = compareVersion
     ? buildDiffLines(compareVersion.toolkit, toolkitDraft)
     : [];
@@ -1120,7 +1187,40 @@ export default function Home() {
               </div>
             </div>
 
+            <details className="group mb-5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)]">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-[var(--color-text)]">
+                <span>Toolkit generation instructions</span>
+                <span className="flex items-center gap-3">
+                  <span className="text-xs font-medium text-[var(--color-text-muted)]">
+                    {isDefaultToolkitPrompt ? 'Default prompt' : 'Custom prompt'}
+                  </span>
+                  <svg
+                    className="h-4 w-4 text-[var(--color-text-muted)] transition-transform group-open:rotate-180"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="m19 9-7 7-7-7" />
+                  </svg>
+                </span>
+              </summary>
+              <div className="border-t border-[var(--color-border)] p-4">
+                <p className="mb-3 text-sm text-[var(--color-text-muted)]">
+                  These instructions guide regeneration and AI revisions as well as the first toolkit.
+                </p>
+                {toolkitPromptFields(9)}
+              </div>
+            </details>
+
+            <label
+              htmlFor="ai-edit-instructions"
+              className="block text-sm font-semibold text-[var(--color-text)] mb-2"
+            >
+              Describe your edits
+            </label>
+
             <textarea
+              id="ai-edit-instructions"
               value={aiEditInstructions}
               onChange={(e) => setAiEditInstructions(e.target.value)}
               rows={3}
@@ -1131,14 +1231,14 @@ export default function Home() {
             <div className="flex flex-wrap gap-3 mt-4">
               <button
                 onClick={handleAiEditToolkit}
-                disabled={isLoading || !aiEditInstructions.trim()}
+                disabled={isLoading || !aiEditInstructions.trim() || !toolkitPrompt.trim()}
                 className="px-4 py-3 rounded-xl bg-[var(--color-accent)] text-white font-semibold hover:bg-[var(--color-accent-hover)] hover:shadow-lg hover:shadow-[var(--color-accent)]/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Edit With AI
               </button>
               <button
                 onClick={handleRegenerateToolkit}
-                disabled={isLoading}
+                disabled={isLoading || !toolkitPrompt.trim()}
                 className="px-4 py-3 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Regenerate Completely
@@ -1559,7 +1659,7 @@ export default function Home() {
 
         {/* Preacher Name */}
         {transcript && (
-          <div className="opacity-0 animate-fade-in stagger-3 mb-10">
+          <div className="opacity-0 animate-fade-in stagger-3 mb-6">
             <label
               htmlFor="preacher-name"
               className="block text-sm font-semibold text-[var(--color-text-muted)] mb-3 uppercase tracking-wider"
@@ -1577,6 +1677,29 @@ export default function Home() {
           </div>
         )}
 
+        {/* Toolkit Generation Instructions */}
+        {transcript && (
+          <section className="opacity-0 animate-fade-in stagger-3 mb-10 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+              <div>
+                <label
+                  htmlFor="toolkit-prompt"
+                  className="block text-lg font-semibold text-[var(--color-text)]"
+                >
+                  Toolkit generation instructions
+                </label>
+                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                  View and edit the full prompt used to create your first toolkit.
+                </p>
+              </div>
+              <span className="self-start rounded-full bg-[var(--color-accent-subtle)] px-3 py-1 text-xs font-semibold text-[var(--color-accent)]">
+                {isDefaultToolkitPrompt ? 'Using default' : 'Customized'}
+              </span>
+            </div>
+            {toolkitPromptFields(14)}
+          </section>
+        )}
+
         {/* Action Buttons */}
         {transcript && (
           <div className="opacity-0 animate-fade-in stagger-4 space-y-4">
@@ -1589,7 +1712,7 @@ export default function Home() {
               </button>
               <button
                 onClick={handleGenerateToolkit}
-                disabled={!preacherName.trim() || isLoading}
+                disabled={!preacherName.trim() || !toolkitPrompt.trim() || isLoading}
                 className="flex-1 py-4 px-6 rounded-xl bg-[var(--color-accent)] text-white font-semibold text-lg hover:bg-[var(--color-accent-hover)] hover:shadow-lg hover:shadow-[var(--color-accent)]/20 transition-all duration-300 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
               >
                 Generate Toolkit
