@@ -1,20 +1,24 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 
 import { hasValidCronAuthorization } from './cron-auth';
 
 describe('hasValidCronAuthorization', () => {
   test('accepts the configured Vercel cron bearer token', () => {
-    expect(hasValidCronAuthorization('Bearer daily-secret', 'daily-secret')).toBe(
+    assert.equal(
+      hasValidCronAuthorization('Bearer daily-secret', 'daily-secret'),
       true
     );
   });
 
   test('rejects missing or incorrect credentials', () => {
-    expect(hasValidCronAuthorization(null, 'daily-secret')).toBe(false);
-    expect(hasValidCronAuthorization('Bearer daily-secret', undefined)).toBe(
+    assert.equal(hasValidCronAuthorization(null, 'daily-secret'), false);
+    assert.equal(
+      hasValidCronAuthorization('Bearer daily-secret', undefined),
       false
     );
-    expect(hasValidCronAuthorization('Bearer another-secret', 'daily-secret')).toBe(
+    assert.equal(
+      hasValidCronAuthorization('Bearer another-secret', 'daily-secret'),
       false
     );
   });
