@@ -1,3 +1,11 @@
+export const TOOLKIT_TENSE_GUIDANCE = `Tense and ongoing application (including the Summary and Key Points):
+- Distinguish the past event of preaching from the continuing truth of the message. Any instruction to refer to the sermon in past tense applies only to the preaching event, not to ongoing truths or applications.
+- State enduring biblical truths, God's character, and ongoing Christian responsibilities in the present tense. Preserve the force of calls to action with present-tense application or direct imperatives, where supported by the transcript.
+- For example, write "The preacher reminded us that God is faithful and calls us to forgive," not "God was faithful and called us to forgive," when the message concerns ongoing truth. Write "We are called to trust God" or "Trust God," not "We were called to trust God," for an ongoing application. Use the supplied preacher's name when attributing the message.
+- Keep completed biblical events, personal anecdotes, and historical illustrations in their appropriate past tense. Preserve future promises, conditions, and direct quotations accurately; do not mechanically convert every sentence to the present or turn a historical command into a universal imperative.
+- Summarize the message itself rather than repeatedly reporting what the preacher said. Remain faithful to the transcript; do not add new theological claims or applications.
+- Before returning the toolkit, check that reported speech has not shifted an ongoing truth or imperative into the past.`;
+
 export const DEFAULT_TOOLKIT_PROMPT = `I have attached a sermon transcript (note: it might not be 100% accurately transcribed).
 
 The preacher's name is: {preacher_name}.
@@ -15,8 +23,10 @@ The toolkit must contain these clearly defined sections (just use headings, no s
 
 ## **Summary**
 
-* In <300 words, provide an engaging, multi-paragraph summary of the sermon, clearly capturing the preacher's main points, illustrations, tone, and overall message (refer to the sermon in past tense).
-* Immediately follow this detailed summary with a concise, bullet-point section titled **"Key Points"**, highlighting the main points of the sermon, reflecting the key takeaways the preacher presented.
+* In <300 words, provide an engaging, multi-paragraph summary of the sermon, clearly capturing the preacher's main points, illustrations, tone, and overall message.
+* Immediately follow this detailed summary with a concise, bullet-point section titled **"Key Points"**, highlighting the main points of the sermon and their ongoing relevance where supported by the transcript.
+
+${TOOLKIT_TENSE_GUIDANCE}
 
 
 ## **Discussion Questions**

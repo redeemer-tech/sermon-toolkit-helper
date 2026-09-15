@@ -6,7 +6,10 @@ import {
   buildToolkitGenerationInput,
   type ToolkitHistoryEntry,
 } from '@/lib/toolkit-history-context';
-import { DEFAULT_TOOLKIT_PROMPT } from '@/lib/toolkit-prompt';
+import {
+  DEFAULT_TOOLKIT_PROMPT,
+  TOOLKIT_TENSE_GUIDANCE,
+} from '@/lib/toolkit-prompt';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -125,7 +128,12 @@ function normalizeScriptureReferences(references: string[]): string[] {
 }
 
 function buildToolkitInstructions(basePrompt: string): string {
-  return `${basePrompt}
+  // Saved church prompts may still contain the old blanket past-tense rule.
+  const prompt = basePrompt.includes(TOOLKIT_TENSE_GUIDANCE)
+    ? basePrompt
+    : `${basePrompt}\n\n${TOOLKIT_TENSE_GUIDANCE}`;
+
+  return `${prompt}
 
 Implementation requirements for this model call:
 - Return a JSON object that matches the provided schema.
