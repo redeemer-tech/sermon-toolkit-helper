@@ -390,7 +390,7 @@ export async function generateToolkit({
     toolkit_markdown: string;
     scripture_references: string[];
   }>({
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     reasoning: {
       effort: 'high',
     },
@@ -423,7 +423,7 @@ export async function reviseToolkit({
     toolkit_markdown: string;
     scripture_references: string[];
   }>({
-    model: 'gpt-5.6-terra',
+    model: 'gpt-6.1-sol',
     reasoning: {
       effort: 'high',
     },

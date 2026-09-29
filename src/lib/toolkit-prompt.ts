@@ -1,4 +1,4 @@
-export const TOOLKIT_TENSE_GUIDANCE = `Tense and ongoing application (including the Summary and Key Points):
+export const TOOLKIT_TENSE_GUIDANCE = `Tense and ongoing application (throughout the toolkit):
 - Distinguish the past event of preaching from the continuing truth of the message. Any instruction to refer to the sermon in past tense applies only to the preaching event, not to ongoing truths or applications.
 - State enduring biblical truths, God's character, and ongoing Christian responsibilities in the present tense. Preserve the force of calls to action with present-tense application or direct imperatives, where supported by the transcript.
 - For example, write "The preacher reminded us that God is faithful and calls us to forgive," not "God was faithful and called us to forgive," when the message concerns ongoing truth. Write "We are called to trust God" or "Trust God," not "We were called to trust God," for an ongoing application. Use the supplied preacher's name when attributing the message.
