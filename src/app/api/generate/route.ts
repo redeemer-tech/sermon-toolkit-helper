@@ -23,6 +23,7 @@ export async function POST(request: NextRequest) {
     const {
       transcript,
       preacherName,
+      sermonTitle,
       customPrompt,
       sessionId,
       parentVersionId,
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
     const toolkit = await generateToolkit({
       transcript: normalizedTranscript,
       preacherName: normalizedPreacherName,
+      sermonTitle: typeof sermonTitle === 'string' ? sermonTitle.trim() : undefined,
       customPrompt: savedPrompt,
       history,
     });

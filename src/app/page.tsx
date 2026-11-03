@@ -56,6 +56,7 @@ export default function Home() {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [inputMode, setInputMode] = useState<InputMode>('audio');
   const [transcript, setTranscript] = useState('');
+  const [sermonTitle, setSermonTitle] = useState('');
   const [preacherName, setPreacherName] = useState('');
   const [versions, setVersions] = useState<ToolkitVersion[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -385,6 +386,7 @@ export default function Home() {
       setToolkitDraft('');
       setAiEditInstructions('');
       setPreacherName('');
+      setSermonTitle('');
       setAudioFile(null);
       setAppState('login');
     }
@@ -465,6 +467,7 @@ export default function Home() {
       body: JSON.stringify({
         transcript,
         preacherName,
+        sermonTitle: sermonTitle.trim() || undefined,
         customPrompt: toolkitPrompt,
         sessionId,
         parentVersionId: activeVersionId,
@@ -555,6 +558,7 @@ export default function Home() {
         body: JSON.stringify({
           transcript,
           preacherName,
+          sermonTitle: sermonTitle.trim() || undefined,
           customPrompt: toolkitPrompt,
           currentToolkit: toolkitDraft,
           editInstructions: aiEditInstructions,
@@ -655,6 +659,7 @@ export default function Home() {
     setToolkitDraft('');
     setAiEditInstructions('');
     setPreacherName('');
+    setSermonTitle('');
     setAudioFile(null);
     setAppState('input');
     if (fileInputRef.current) {
@@ -1912,6 +1917,17 @@ export default function Home() {
               value={preacherName}
               onChange={(e) => setPreacherName(e.target.value)}
               placeholder="Enter the preacher's name"
+              className="w-full px-5 py-4 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/20 transition-all text-lg shadow-sm"
+            />
+            <label htmlFor="sermon-title" className="block text-sm font-semibold text-[var(--color-text-muted)] mt-5 mb-3 uppercase tracking-wider">
+              Sermon title (optional)
+            </label>
+            <input
+              id="sermon-title"
+              type="text"
+              value={sermonTitle}
+              onChange={(e) => setSermonTitle(e.target.value)}
+              placeholder="Leave blank for a suggested title"
               className="w-full px-5 py-4 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/20 transition-all text-lg shadow-sm"
             />
           </div>

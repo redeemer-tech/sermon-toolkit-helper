@@ -19,6 +19,7 @@ export async function POST(request: NextRequest) {
     const {
       transcript,
       preacherName,
+      sermonTitle,
       customPrompt,
       currentToolkit,
       editInstructions,
@@ -65,6 +66,7 @@ export async function POST(request: NextRequest) {
     const toolkit = await reviseToolkit({
       transcript: transcript.trim(),
       preacherName: preacherName.trim(),
+      sermonTitle: typeof sermonTitle === 'string' ? sermonTitle.trim() : undefined,
       customPrompt: savedPrompt,
       currentToolkit,
       editInstructions,

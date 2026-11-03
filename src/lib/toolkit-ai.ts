@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import Groq from 'groq-sdk';
+import { applySermonTitle } from '@/lib/toolkit-title';
 
 import {
   buildHistoryAwareInstructions,
@@ -54,6 +55,7 @@ type GenerateToolkitParams = {
   transcript: string;
   preacherName: string;
   customPrompt?: string;
+  sermonTitle?: string;
   history?: ToolkitHistoryEntry[];
 };
 
@@ -62,11 +64,14 @@ type ReviseToolkitParams = Omit<GenerateToolkitParams, 'history'> & {
   editInstructions: string;
 };
 
-function getPrompt(preacherName: string, customPrompt?: string): string {
-  return (customPrompt || DEFAULT_TOOLKIT_PROMPT).replace(
+function getPrompt(preacherName: string, customPrompt?: string, sermonTitle?: string): string {
+  const prompt = (customPrompt || DEFAULT_TOOLKIT_PROMPT).replace(
     '{preacher_name}',
     preacherName
   );
+  return sermonTitle?.trim()
+    ? `${prompt}\n\nUse the supplied sermon title verbatim in the toolkit heading, followed by the primary Scripture reference in parentheses. Supplied title: ${JSON.stringify(sermonTitle.trim())}`
+    : prompt;
 }
 
 function getResponseText(response: OpenAI.Responses.Response): string {
@@ -407,10 +412,11 @@ function mergeToolkit(toolkitMarkdown: string, appendixMarkdown: string): string
 export async function generateToolkit({
   transcript,
   preacherName,
+  sermonTitle,
   customPrompt,
   history = [],
 }: GenerateToolkitParams): Promise<string> {
-  const prompt = getPrompt(preacherName, customPrompt);
+  const prompt = getPrompt(preacherName, customPrompt, sermonTitle);
 
   const source = buildToolkitGenerationInput(transcript, history);
   const continuity = buildHistoryAwareInstructions(history.length);
@@ -470,17 +476,18 @@ Create the complete toolkit. Synthesize the strongest questions using both revie
   );
   const appendixMarkdown = await renderAppendix(prompt, scriptureReferences);
 
-  return mergeToolkit(toolkitMarkdown, appendixMarkdown);
+  return mergeToolkit(applySermonTitle(toolkitMarkdown, sermonTitle), appendixMarkdown);
 }
 
 export async function reviseToolkit({
   transcript,
   preacherName,
+  sermonTitle,
   customPrompt,
   currentToolkit,
   editInstructions,
 }: ReviseToolkitParams): Promise<string> {
-  const prompt = getPrompt(preacherName, customPrompt);
+  const prompt = getPrompt(preacherName, customPrompt, sermonTitle);
 
   const revisionResponse = await createStructuredResponse<{
     toolkit_markdown: string;
@@ -518,5 +525,5 @@ You are revising an existing toolkit, not starting from scratch unless the reque
   );
   const appendixMarkdown = await renderAppendix(prompt, scriptureReferences);
 
-  return mergeToolkit(toolkitMarkdown, appendixMarkdown);
+  return mergeToolkit(applySermonTitle(toolkitMarkdown, sermonTitle), appendixMarkdown);
 }
