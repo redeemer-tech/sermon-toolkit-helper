@@ -441,7 +441,7 @@ export async function generateToolkit({
 
   const draftInput = `${source}\n\nDiscussion drafts for review:\n${JSON.stringify(drafts)}`;
   const reviewerAssignments = [
-    'As a group participant hearing these aloud, compare all three drafts for accessibility. Try answering each question. Flag vague, leading, compound or repetitive questions, especially a prayer prompt that repeats the response. Suggest specific replacements.',
+    'As a group participant hearing these aloud, compare all three drafts for accessibility. Try answering each question. Flag vague, leading, compound or repetitive questions, especially a prayer prompt that repeats the response. Suggest specific replacements. At every stage, replace prompts about why conversations become frustrating with a question about an observable choice someone faces.',
     'As a pastoral reviewer, compare all three drafts against the current sermon and cited passages. Check the diagnosis and conversation arc, gospel basis, voluntary sharing, and whether the challenge is supported by the text. Flag speculative or accusatory wording and suggest specific replacements.',
   ];
   const reviews = await Promise.all(reviewerAssignments.map((assignment) =>
@@ -457,7 +457,7 @@ export async function generateToolkit({
       effort: 'high',
     },
     instructions: `${buildToolkitInstructions(generationPrompt)}${continuity}
-Create the complete toolkit. Synthesize the strongest questions using both reviews. Resolve disagreements against the current transcript and the church instructions. Read the questions in order and repair any abrupt transitions. Include readings used by the final questions in the reference list. Omit draft labels, diagnosis and reviews.`,
+Create the complete toolkit. Synthesize the strongest questions using both reviews. Resolve disagreements against the current transcript and the church instructions. Read the questions in order and repair any abrupt transitions. For Recognise, ask for an ordinary situation where someone faces the tension identified in Wrestle. Reject invitations to analyse how people talk about a contentious issue or why they keep complaining. Include readings used by the final questions in the reference list. Omit draft labels, diagnosis and reviews.`,
     input: `${draftInput}\n\nIndependent editorial reviews:\n${JSON.stringify(reviews)}`,
     schemaName: 'toolkit_generation',
     schema: TOOLKIT_RESPONSE_SCHEMA,
