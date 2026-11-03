@@ -8,6 +8,8 @@ import {
 } from '@/lib/toolkit-history-context';
 import {
   DEFAULT_TOOLKIT_PROMPT,
+  TOOLKIT_ARC_GUIDANCE,
+  TOOLKIT_DISCUSSION_GUIDANCE,
   TOOLKIT_TENSE_GUIDANCE,
 } from '@/lib/toolkit-prompt';
 
@@ -332,6 +334,30 @@ async function createStructuredResponse<T>({
   return parseJsonResponse<T>(getResponseText(response), schemaName);
 }
 
+async function requestEditorialNote(
+  schemaName: string,
+  instructions: string,
+  input: string,
+  assignment: string
+): Promise<string> {
+  const response = await createStructuredResponse<{ note: string }>({
+    model: 'gpt-6.1-sol',
+    reasoning: { effort: 'medium' },
+    instructions: `${instructions}\n\n${assignment} Keep your contribution under 450 words.`,
+    input,
+    schemaName,
+    schema: {
+      type: 'object',
+      properties: { note: { type: 'string' } },
+      required: ['note'],
+      additionalProperties: false,
+    },
+    maxOutputTokens: 4000,
+  });
+  if (!response.note.trim()) throw new Error(`Empty ${schemaName} response`);
+  return response.note.trim();
+}
+
 async function renderAppendix(
   prompt: string,
   scriptureReferences: string[]
@@ -386,6 +412,42 @@ export async function generateToolkit({
 }: GenerateToolkitParams): Promise<string> {
   const prompt = getPrompt(preacherName, customPrompt);
 
+  const source = buildToolkitGenerationInput(transcript, history);
+  const continuity = buildHistoryAwareInstructions(history.length);
+  // Existing churches supply saved prompts, including versions predating the arc.
+  const generationPrompt = prompt.includes(TOOLKIT_ARC_GUIDANCE)
+    ? prompt
+    : `${prompt}\n\n${TOOLKIT_ARC_GUIDANCE}`;
+  const discussionInstructions = [
+    generationPrompt,
+    generationPrompt.includes(TOOLKIT_DISCUSSION_GUIDANCE) ? '' : TOOLKIT_DISCUSSION_GUIDANCE,
+    'Honour the church’s requested format and language. Return only the editorial work assigned below.',
+    continuity,
+  ].filter(Boolean).join('\n\n');
+
+  const angles = [
+    'Start from a revealing detail in the central passage.',
+    'Start from the tension the preacher wanted listeners to wrestle with.',
+    'Start from an ordinary choice the sermon helps listeners see differently.',
+  ];
+  const drafts = await Promise.all(angles.map((angle) =>
+    requestEditorialNote(
+      'discussion_draft',
+      discussionInstructions,
+      source,
+      `Draft a complete candidate discussion. Briefly identify the sermon DNA, then write the six connected questions with readings and any essential leader notes. Use this angle only if supported: ${angle}`
+    )
+  ));
+
+  const draftInput = `${source}\n\nDiscussion drafts for review:\n${JSON.stringify(drafts)}`;
+  const reviewerAssignments = [
+    'As a group participant hearing these aloud, compare all three drafts for accessibility. Try answering each question. Flag vague, leading, compound or repetitive questions, especially a prayer prompt that repeats the response. Suggest specific replacements.',
+    'As a pastoral reviewer, compare all three drafts against the current sermon and cited passages. Check the diagnosis and conversation arc, gospel basis, voluntary sharing, and whether the challenge is supported by the text. Flag speculative or accusatory wording and suggest specific replacements.',
+  ];
+  const reviews = await Promise.all(reviewerAssignments.map((assignment) =>
+    requestEditorialNote('discussion_review', discussionInstructions, draftInput, assignment)
+  ));
+
   const toolkitResponse = await createStructuredResponse<{
     toolkit_markdown: string;
     scripture_references: string[];
@@ -394,8 +456,9 @@ export async function generateToolkit({
     reasoning: {
       effort: 'high',
     },
-    instructions: `${buildToolkitInstructions(prompt)}${buildHistoryAwareInstructions(history.length)}`,
-    input: buildToolkitGenerationInput(transcript, history),
+    instructions: `${buildToolkitInstructions(generationPrompt)}${continuity}
+Create the complete toolkit. Synthesize the strongest questions using both reviews. Resolve disagreements against the current transcript and the church instructions. Read the questions in order and repair any abrupt transitions. Include readings used by the final questions in the reference list. Omit draft labels, diagnosis and reviews.`,
+    input: `${draftInput}\n\nIndependent editorial reviews:\n${JSON.stringify(reviews)}`,
     schemaName: 'toolkit_generation',
     schema: TOOLKIT_RESPONSE_SCHEMA,
     maxOutputTokens: 6000,
